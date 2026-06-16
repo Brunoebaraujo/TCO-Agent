@@ -39,7 +39,8 @@ export default function ChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [...messages, userMessage],
+          // Não envia a mensagem de boas-vindas estática (índice 0) — só o histórico real da conversa
+          messages: [...messages.slice(1), userMessage],
           opportunity_context: {},
         }),
       })

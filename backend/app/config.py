@@ -10,11 +10,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str
     claude_model: str = "claude-sonnet-4-6"
 
-    # Banco
-    database_url: str
+    # Banco — padrão SQLite local, zero configuração necessária
+    database_url: str = "sqlite:///./tco_local.db"
 
     # App
-    secret_key: str
+    secret_key: str = "dev-secret-key-troque-isso-em-producao"
     environment: str = "development"
     cors_origins: List[str] = ["http://localhost:5173"]
 

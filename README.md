@@ -37,7 +37,27 @@ tco-engine/
 └── railway.toml       # Configuração de deploy Railway
 ```
 
-## Setup local
+## Setup local (recomendado para começar — sem custo de hospedagem)
+
+Ver guia completo em [`docs/SETUP_LOCAL.md`](docs/SETUP_LOCAL.md).
+
+Resumo rápido:
+```bash
+cp .env.example .env
+# Editar .env e preencher apenas ANTHROPIC_API_KEY
+
+cd backend && python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp ../.env .env
+uvicorn app.main:app --reload     # http://localhost:8000
+
+# Em outro terminal:
+cd frontend && npm install && npm run dev    # http://localhost:5173
+```
+
+Por padrão, o banco é **SQLite local** (arquivo `tco_local.db`, criado automaticamente) — zero configuração, zero custo de hospedagem.
+
+## Deploy em produção (Railway)
 
 ### Pré-requisitos
 - Node.js 20+

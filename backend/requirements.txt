@@ -9,7 +9,10 @@ uvicorn[standard]==0.30.6
 # Banco de dados
 sqlalchemy==2.0.35
 alembic==1.13.3
-psycopg2-binary==2.9.9        # Driver PostgreSQL
+aiosqlite==0.20.0               # Driver SQLite assíncrono — padrão para uso local
+# Para produção com PostgreSQL (Railway ou outro), descomentar:
+# asyncpg==0.29.0
+# psycopg2-binary==2.9.9
 
 # IA
 anthropic==0.34.2              # Claude API
