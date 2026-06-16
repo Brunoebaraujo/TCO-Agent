@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: #1a3a5c;      /* Azul Goodpack escuro */
+    --color-accent: #e8722a;       /* Laranja Goodpack */
+    --color-surface: #f8f9fa;
+    --color-border: #e2e8f0;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  /* Badge de confidence level */
+  .badge-verified {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200;
+  }
+  .badge-high-confidence {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200;
+  }
+  .badge-validation-required {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200;
+  }
+
+  /* Bolha de chat */
+  .chat-bubble-user {
+    @apply bg-[var(--color-primary)] text-white rounded-2xl rounded-tr-sm px-4 py-3 max-w-lg ml-auto;
+  }
+  .chat-bubble-agent {
+    @apply bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 max-w-2xl shadow-sm;
+  }
+}

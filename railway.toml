@@ -1,0 +1,31 @@
+# =============================================================
+# Railway — configuração de deploy
+# Dois serviços: frontend (React) e backend (FastAPI)
+# PostgreSQL é adicionado via painel Railway (Add Service → PostgreSQL)
+# =============================================================
+
+[build]
+builder = "nixpacks"
+
+[[services]]
+name = "backend"
+source = "backend"
+
+[services.build]
+buildCommand = "pip install -r requirements.txt && alembic upgrade head"
+
+[services.start]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+
+[services.variables]
+ENVIRONMENT = "production"
+
+[[services]]
+name = "frontend"
+source = "frontend"
+
+[services.build]
+buildCommand = "npm install && npm run build"
+
+[services.start]
+startCommand = "npx serve dist --listen $PORT"
