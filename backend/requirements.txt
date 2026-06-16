@@ -1,38 +1,40 @@
 # =============================================================
 # TCO Engine Backend — dependências Python
 # =============================================================
+# Nota: usamos >= em vez de == nos pacotes sensíveis a versão do Python
+# (pydantic, fastapi) para garantir compatibilidade com versões recentes
+# do Python (3.12 a 3.14+) sem precisar compilar do zero.
 
 # Web framework
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.6
 
 # Banco de dados
-sqlalchemy==2.0.35
-alembic==1.13.3
-aiosqlite==0.20.0               # Driver SQLite assíncrono — padrão para uso local
+sqlalchemy>=2.0.35
+alembic>=1.13.3
+aiosqlite>=0.20.0               # Driver SQLite assíncrono — padrão para uso local
 # Para produção com PostgreSQL (Railway ou outro), descomentar:
-# asyncpg==0.29.0
-# psycopg2-binary==2.9.9
+# asyncpg>=0.29.0
+# psycopg2-binary>=2.9.9
 
 # IA
-anthropic==0.34.2              # Claude API
+anthropic>=0.34.2              # Claude API
 
 # Validação e configuração
-pydantic==2.9.2
-pydantic-settings==2.5.2
-python-dotenv==1.0.1
+pydantic>=2.9.2
+pydantic-settings>=2.5.2
+python-dotenv>=1.0.1
 
 # Autenticação
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.9
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.9
 
 # Utilitários
-httpx==0.27.2                  # HTTP client (Salesforce API)
-openpyxl==3.1.5                # Leitura de arquivos Excel (importação inicial)
-python-pptx==1.0.2             # Export PowerPoint (fase 2)
+httpx>=0.27.2                  # HTTP client (Salesforce API)
+openpyxl>=3.1.5                # Leitura de arquivos Excel (importação inicial)
+python-pptx>=1.0.2             # Export PowerPoint (fase 2)
 
 # Testes
-pytest==8.3.3
-pytest-asyncio==0.24.0
-httpx==0.27.2
+pytest>=8.3.3
+pytest-asyncio>=0.24.0
