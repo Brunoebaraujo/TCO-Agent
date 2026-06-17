@@ -41,7 +41,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         if not history or history[0]["role"] != "user":
             history = [m for m in history if m["role"] == "user"] or history
 
-        raw_reply = await ask_agent(history)
+        raw_reply = await ask_agent(history, db)
         clean_text, tco_result = extract_tco_result(raw_reply)
 
         return {
