@@ -2,13 +2,16 @@
 Router: TCO — endpoints para gerar e consultar análises TCO
 """
 import json
+import re
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.db.models import ChatSession
+from app.integrations.pptx_export import generate_tco_pptx
 
 router = APIRouter()
 
@@ -111,3 +114,38 @@ async def delete_session(session_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
     await db.delete(session)
     return {"deleted": True}
+
+
+def _safe_filename(name: str) -> str:
+    """Remove caracteres problemáticos para nome de arquivo."""
+    cleaned = re.sub(r"[^\w\s-]", "", name).strip()
+    return re.sub(r"[\s]+", "_", cleaned) or "TCO"
+
+
+@router.get("/{session_id}/export/pptx")
+async def export_pptx(
+    session_id: int,
+    include_assumptions: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Gera e retorna um arquivo .pptx com o resultado de TCO mais recente
+    desta sessão. include_assumptions=false gera apenas o slide resumo.
+    """
+    session = await db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    if not session.last_tco_result_json:
+        raise HTTPException(status_code=400, detail="Esta sessão ainda não tem um TCO calculado")
+
+    tco_result = json.loads(session.last_tco_result_json)
+    pptx_bytes = generate_tco_pptx(tco_result, include_assumptions=include_assumptions)
+
+    customer = tco_result.get("customer_name", "TCO")
+    filename = f"TCO_{_safe_filename(customer)}_{datetime.now().strftime('%Y%m%d')}.pptx"
+
+    return Response(
+        content=pptx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

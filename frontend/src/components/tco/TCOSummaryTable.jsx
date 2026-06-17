@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Download, ChevronDown, Loader2 } from 'lucide-react'
 import ConfidenceBadge from '../ui/ConfidenceBadge'
 
 function formatCurrency(value, currency = 'USD') {
@@ -9,12 +10,45 @@ function formatCurrency(value, currency = 'USD') {
   }).format(value)
 }
 
-export default function TCOSummaryTable({ result }) {
+export default function TCOSummaryTable({ result, sessionId }) {
   const chartRef = useRef(null)
   const chartInstanceRef = useRef(null)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const categories = result?.categories ?? []
   const competitorName = result?.competitor_name ?? 'Concorrente'
+
+  async function handleExport(includeAssumptions) {
+    if (!sessionId) return
+    setExportMenuOpen(false)
+    setExporting(true)
+    try {
+      const url = `/api/tco/${sessionId}/export/pptx?include_assumptions=${includeAssumptions}`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('Falha ao exportar')
+      const blob = await res.blob()
+
+      // Extrai o nome do arquivo sugerido pelo backend, com fallback
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const filename = match ? match[1] : 'TCO.pptx'
+
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(downloadUrl)
+    } catch (err) {
+      console.error('Erro ao exportar PPTX:', err)
+      alert('Não foi possível exportar o arquivo. Tente novamente.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   useEffect(() => {
     if (!result || !chartRef.current || categories.length === 0) return
@@ -181,6 +215,40 @@ export default function TCOSummaryTable({ result }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Export */}
+      {sessionId && (
+        <div className="mt-4 pt-3 border-t border-slate-100 relative">
+          <button
+            onClick={() => setExportMenuOpen(o => !o)}
+            disabled={exporting}
+            className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          >
+            {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            <span>Exportar PowerPoint</span>
+            <ChevronDown size={14} className="text-slate-400" />
+          </button>
+
+          {exportMenuOpen && (
+            <div className="absolute bottom-full left-0 mb-1 bg-white border border-slate-200 rounded-lg shadow-sm py-1 w-64 z-10">
+              <button
+                onClick={() => handleExport(false)}
+                className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Apenas resumo
+                <span className="block text-xs text-slate-400">Tabela, gráfico e saving total</span>
+              </button>
+              <button
+                onClick={() => handleExport(true)}
+                className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Resumo + premissas
+                <span className="block text-xs text-slate-400">Inclui slide com fontes e confiança</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

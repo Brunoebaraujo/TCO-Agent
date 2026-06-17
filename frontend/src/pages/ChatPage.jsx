@@ -152,7 +152,7 @@ export default function ChatPage() {
                   <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                 </div>
               )}
-              {msg.tco_result && <TCOSummaryTable result={msg.tco_result} />}
+              {msg.tco_result && <TCOSummaryTable result={msg.tco_result} sessionId={sessionId} />}
             </div>
           </div>
         ))}
