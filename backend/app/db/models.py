@@ -87,10 +87,10 @@ class PackagingAccessory(Base):
     goodpack_sku_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goodpack_skus.id"))
     competitor_unit_id: Mapped[Optional[int]] = mapped_column(ForeignKey("competitor_units.id"))
 
-    # NULL = vale para qualquer produto (default genérico da embalagem).
-    # Preenchido = vale especificamente para essa combinação embalagem+produto
-    # (ex: MB6 + FCOJ usa Poly Liner; MB6 + NFC usa Aseptic Bag).
-    product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_catalog.id"))
+    # NULL = vale para qualquer produto/tipo (default genérico da embalagem).
+    # Preenchido = vale especificamente para essa combinação embalagem+tipo de produto
+    # (ex: MB6 + Orange/FCOJ usa Poly Liner; MB6 + Orange/NFC usa Aseptic Bag).
+    product_type_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_types.id"))
 
     accessory_type_id: Mapped[int] = mapped_column(ForeignKey("accessory_types.id"), nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -110,7 +110,7 @@ class PackagingAccessory(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     accessory_type: Mapped["AccessoryType"] = relationship()
-    product: Mapped[Optional["ProductCatalog"]] = relationship()
+    product_type: Mapped[Optional["ProductType"]] = relationship()
 
 
 class CompetitorUnit(Base):
@@ -236,16 +236,51 @@ class HandlingBenchmark(Base):
     )
 
 
-class ProductCatalog(Base):
-    __tablename__ = "product_catalog"
+class ProductCategory(Base):
+    """Nível 1 da hierarquia de produtos. Ex: Citrus, Dairy, Petrochemicals."""
+    __tablename__ = "product_categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    product_name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    category_code: Mapped[Optional[str]] = mapped_column(String(10))
-    category_name: Mapped[Optional[str]] = mapped_column(String(100))
+    category_name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+
+class Product(Base):
+    """Nível 2 da hierarquia. Ex: Orange, Lemon — pertence a uma categoria."""
+    __tablename__ = "products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("product_categories.id"), nullable=False)
+    product_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    category: Mapped["ProductCategory"] = relationship()
+
+    __table_args__ = (UniqueConstraint("category_id", "product_name", name="uq_product_per_category"),)
+
+
+class ProductType(Base):
+    """
+    Nível 3 (mais específico) da hierarquia. Ex: NFC, FCOJ, Concentrate —
+    o tipo de processamento de um produto. É este nível que determina quais
+    acessórios uma embalagem usa (ver PackagingAccessory.product_type_id).
+    """
+    __tablename__ = "product_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    type_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    product: Mapped["Product"] = relationship()
+
+    __table_args__ = (UniqueConstraint("product_id", "type_name", name="uq_type_per_product"),)
 
 
 class TCOAnalysis(Base):
@@ -255,7 +290,7 @@ class TCOAnalysis(Base):
     salesforce_opportunity_id: Mapped[Optional[str]] = mapped_column(String(100))
 
     customer_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_catalog.id"))
+    product_type_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_types.id"))
     product_name_raw: Mapped[Optional[str]] = mapped_column(String(100))
     goodpack_sku_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goodpack_skus.id"))
     competitor_unit_id: Mapped[Optional[int]] = mapped_column(ForeignKey("competitor_units.id"))

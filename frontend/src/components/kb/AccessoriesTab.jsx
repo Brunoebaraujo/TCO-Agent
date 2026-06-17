@@ -6,39 +6,31 @@ export default function AccessoriesTab() {
   const [skus, setSkus] = useState([])
   const [competitors, setCompetitors] = useState([])
   const [accessoryTypes, setAccessoryTypes] = useState([])
-  const [products, setProducts] = useState([])
-  const [selectedPackaging, setSelectedPackaging] = useState(null) // { type, id, label }
+  const [productTree, setProductTree] = useState([])
+  const [selectedPackaging, setSelectedPackaging] = useState(null)
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState(null)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [form, setForm] = useState({ accessory_type_id: '', product_id: '', default_unit_price: '' })
+  const [form, setForm] = useState({ accessory_type_id: '', category_id: '', product_id: '', product_type_id: '', default_unit_price: '' })
 
   useEffect(() => {
     Promise.all([
       fetch('/api/kb/skus').then(r => r.json()),
       fetch('/api/kb/competitors').then(r => r.json()),
       fetch('/api/kb/accessory-types').then(r => r.json()),
-      fetch('/api/kb/products').then(r => r.json()),
-    ]).then(([skuData, compData, accData, prodData]) => {
+      fetch('/api/kb/products/full-tree').then(r => r.json()),
+    ]).then(([skuData, compData, accData, treeData]) => {
       setSkus(skuData.skus ?? [])
       setCompetitors(compData.competitors ?? [])
       setAccessoryTypes(accData.accessory_types ?? [])
-      setProducts(prodData.products ?? [])
+      setProductTree(treeData.tree ?? [])
       setLoading(false)
       if (skuData.skus?.length) {
         setSelectedPackaging({ type: 'goodpack', id: skuData.skus[0].id, label: skuData.skus[0].sku_code })
       }
     })
   }, [])
-
-  useEffect(() => {
-    if (!selectedPackaging) return
-    const param = selectedPackaging.type === 'goodpack' ? 'goodpack_sku_id' : 'competitor_unit_id'
-    fetch(`/api/kb/packaging-accessories?${param}=${selectedPackaging.id}`)
-      .then(r => r.json())
-      .then(data => setItems(data.packaging_accessories ?? []))
-  }, [selectedPackaging])
 
   function reload() {
     if (!selectedPackaging) return
@@ -47,6 +39,8 @@ export default function AccessoriesTab() {
       .then(r => r.json())
       .then(data => setItems(data.packaging_accessories ?? []))
   }
+
+  useEffect(() => { reload() }, [selectedPackaging])
 
   async function handleSavePrice(itemId, price) {
     const item = items.find(i => i.id === itemId)
@@ -58,7 +52,7 @@ export default function AccessoriesTab() {
         packaging_type: item.packaging_type,
         goodpack_sku_id: item.goodpack_sku_id,
         competitor_unit_id: item.competitor_unit_id,
-        product_id: item.product_id,
+        product_type_id: item.product_type_id,
         accessory_type_id: item.accessory_type_id,
         default_unit_price: parseFloat(price),
         confidence_level: 'verified',
@@ -79,7 +73,7 @@ export default function AccessoriesTab() {
         packaging_type: selectedPackaging.type,
         goodpack_sku_id: selectedPackaging.type === 'goodpack' ? selectedPackaging.id : null,
         competitor_unit_id: selectedPackaging.type === 'competitor' ? selectedPackaging.id : null,
-        product_id: form.product_id ? parseInt(form.product_id) : null,
+        product_type_id: form.product_type_id ? parseInt(form.product_type_id) : null,
         accessory_type_id: parseInt(form.accessory_type_id),
         default_unit_price: form.default_unit_price ? parseFloat(form.default_unit_price) : null,
         confidence_level: form.default_unit_price ? 'verified' : 'validation_required',
@@ -88,7 +82,7 @@ export default function AccessoriesTab() {
       }),
     })
     setShowAddForm(false)
-    setForm({ accessory_type_id: '', product_id: '', default_unit_price: '' })
+    setForm({ accessory_type_id: '', category_id: '', product_id: '', product_type_id: '', default_unit_price: '' })
     reload()
   }
 
@@ -96,12 +90,14 @@ export default function AccessoriesTab() {
     return <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin text-slate-400" /></div>
   }
 
-  const genericItems = items.filter(i => !i.product_id)
-  const specializedItems = items.filter(i => i.product_id)
+  const genericItems = items.filter(i => !i.product_type_id)
+  const specializedItems = items.filter(i => i.product_type_id)
+
+  const selectedCategory = productTree.find(c => c.id === parseInt(form.category_id))
+  const selectedProduct = selectedCategory?.products.find(p => p.id === parseInt(form.product_id))
 
   return (
     <div>
-      {/* Seletor de embalagem */}
       <div className="flex flex-wrap gap-2 mb-5">
         {skus.map(sku => (
           <button
@@ -160,19 +156,53 @@ export default function AccessoriesTab() {
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Produto (opcional)</label>
+                <label className="block text-xs text-slate-400 mb-1">Categoria</label>
                 <select
-                  value={form.product_id}
-                  onChange={e => setForm(f => ({ ...f, product_id: e.target.value }))}
+                  value={form.category_id}
+                  onChange={e => setForm(f => ({ ...f, category_id: e.target.value, product_id: '', product_type_id: '' }))}
                   className="px-2 py-1.5 text-sm border border-slate-200 rounded-md"
                 >
                   <option value="">Default (qualquer produto)</option>
-                  {products.map(p => (
-                    <option key={p.id} value={p.id}>{p.product_name}</option>
+                  {productTree.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.category_name}</option>
                   ))}
                 </select>
               </div>
+
+              {selectedCategory && (
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Produto</label>
+                  <select
+                    value={form.product_id}
+                    onChange={e => setForm(f => ({ ...f, product_id: e.target.value, product_type_id: '' }))}
+                    className="px-2 py-1.5 text-sm border border-slate-200 rounded-md"
+                  >
+                    <option value="">Selecione...</option>
+                    {selectedCategory.products.map(p => (
+                      <option key={p.id} value={p.id}>{p.product_name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {selectedProduct && (
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Tipo</label>
+                  <select
+                    value={form.product_type_id}
+                    onChange={e => setForm(f => ({ ...f, product_type_id: e.target.value }))}
+                    className="px-2 py-1.5 text-sm border border-slate-200 rounded-md"
+                  >
+                    <option value="">Selecione...</option>
+                    {selectedProduct.types.map(t => (
+                      <option key={t.id} value={t.id}>{t.type_name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Preço (USD)</label>
                 <input
@@ -194,23 +224,12 @@ export default function AccessoriesTab() {
           )}
 
           <p className="text-xs text-slate-400 mb-2">Default (qualquer produto)</p>
-          <AccessoryList
-            items={genericItems}
-            editingId={editingId}
-            setEditingId={setEditingId}
-            onSavePrice={handleSavePrice}
-          />
+          <AccessoryList items={genericItems} editingId={editingId} setEditingId={setEditingId} onSavePrice={handleSavePrice} />
 
           {specializedItems.length > 0 && (
             <>
-              <p className="text-xs text-slate-400 mb-2 mt-4">Específico por produto</p>
-              <AccessoryList
-                items={specializedItems}
-                editingId={editingId}
-                setEditingId={setEditingId}
-                onSavePrice={handleSavePrice}
-                showProduct
-              />
+              <p className="text-xs text-slate-400 mb-2 mt-4">Específico por produto/tipo</p>
+              <AccessoryList items={specializedItems} editingId={editingId} setEditingId={setEditingId} onSavePrice={handleSavePrice} showProductType />
             </>
           )}
 
@@ -223,7 +242,7 @@ export default function AccessoriesTab() {
   )
 }
 
-function AccessoryList({ items, editingId, setEditingId, onSavePrice, showProduct }) {
+function AccessoryList({ items, editingId, setEditingId, onSavePrice, showProductType }) {
   const [tempPrice, setTempPrice] = useState('')
 
   if (items.length === 0) {
@@ -236,9 +255,9 @@ function AccessoryList({ items, editingId, setEditingId, onSavePrice, showProduc
         <div key={item.id} className="flex items-center justify-between text-sm py-1.5 border-t border-slate-50">
           <div className="flex items-center gap-2">
             <span className="text-slate-700">{item.accessory_name}</span>
-            {showProduct && (
+            {showProductType && (
               <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
-                {item.product_name}
+                {item.product_type_label}
               </span>
             )}
           </div>
@@ -254,10 +273,7 @@ function AccessoryList({ items, editingId, setEditingId, onSavePrice, showProduc
                   onChange={e => setTempPrice(e.target.value)}
                   className="w-24 px-2 py-1 text-sm border border-slate-200 rounded-md"
                 />
-                <button
-                  onClick={() => onSavePrice(item.id, tempPrice)}
-                  className="text-xs text-[#1a3a5c] font-medium"
-                >
+                <button onClick={() => onSavePrice(item.id, tempPrice)} className="text-xs text-[#1a3a5c] font-medium">
                   Salvar
                 </button>
               </>

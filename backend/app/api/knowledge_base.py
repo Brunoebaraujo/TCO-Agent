@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.db.models import (
     GoodpackSKU, CompetitorUnit, CompetitorPricing,
-    ProductCatalog, AccessoryType, PackagingAccessory,
+    ProductCategory, Product, ProductType, AccessoryType, PackagingAccessory,
 )
 
 router = APIRouter()
@@ -154,30 +154,66 @@ async def add_competitor_pricing(
 
 
 # -------------------------------------------------------------
-# Catálogo de produtos
+# Hierarquia de produtos: Categoria > Produto > Tipo
 # -------------------------------------------------------------
 
-class ProductIn(BaseModel):
-    product_name: str
-    category_code: str | None = None
-    category_name: str | None = None
+class ProductCategoryIn(BaseModel):
+    category_name: str
     notes: str | None = None
 
 
+class ProductIn(BaseModel):
+    category_id: int
+    product_name: str
+    notes: str | None = None
+
+
+class ProductTypeIn(BaseModel):
+    product_id: int
+    type_name: str
+    notes: str | None = None
+
+
+@router.get("/product-categories")
+async def list_product_categories(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ProductCategory).where(ProductCategory.active == True))
+    categories = result.scalars().all()
+    return {"categories": [{"id": c.id, "category_name": c.category_name} for c in categories]}
+
+
+@router.post("/product-categories")
+async def create_product_category(payload: ProductCategoryIn, db: AsyncSession = Depends(get_db)):
+    category = ProductCategory(**payload.model_dump())
+    db.add(category)
+    await db.flush()
+    return {"id": category.id}
+
+
+@router.delete("/product-categories/{category_id}")
+async def delete_product_category(category_id: int, db: AsyncSession = Depends(get_db)):
+    category = await db.get(ProductCategory, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada")
+    category.active = False
+    return {"deleted": True}
+
+
 @router.get("/products")
-async def list_products(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(ProductCatalog).where(ProductCatalog.active == True))
+async def list_products(category_id: int | None = None, db: AsyncSession = Depends(get_db)):
+    query = select(Product).where(Product.active == True)
+    if category_id:
+        query = query.where(Product.category_id == category_id)
+    result = await db.execute(query)
     products = result.scalars().all()
     return {"products": [
-        {"id": p.id, "product_name": p.product_name, "category_code": p.category_code,
-         "category_name": p.category_name}
+        {"id": p.id, "category_id": p.category_id, "product_name": p.product_name}
         for p in products
     ]}
 
 
 @router.post("/products")
 async def create_product(payload: ProductIn, db: AsyncSession = Depends(get_db)):
-    product = ProductCatalog(**payload.model_dump())
+    product = Product(**payload.model_dump())
     db.add(product)
     await db.flush()
     return {"id": product.id}
@@ -185,11 +221,63 @@ async def create_product(payload: ProductIn, db: AsyncSession = Depends(get_db))
 
 @router.delete("/products/{product_id}")
 async def delete_product(product_id: int, db: AsyncSession = Depends(get_db)):
-    product = await db.get(ProductCatalog, product_id)
+    product = await db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
     product.active = False
     return {"deleted": True}
+
+
+@router.get("/product-types")
+async def list_product_types(product_id: int | None = None, db: AsyncSession = Depends(get_db)):
+    query = select(ProductType).where(ProductType.active == True)
+    if product_id:
+        query = query.where(ProductType.product_id == product_id)
+    result = await db.execute(query)
+    types = result.scalars().all()
+    return {"product_types": [
+        {"id": t.id, "product_id": t.product_id, "type_name": t.type_name}
+        for t in types
+    ]}
+
+
+@router.post("/product-types")
+async def create_product_type(payload: ProductTypeIn, db: AsyncSession = Depends(get_db)):
+    ptype = ProductType(**payload.model_dump())
+    db.add(ptype)
+    await db.flush()
+    return {"id": ptype.id}
+
+
+@router.delete("/product-types/{type_id}")
+async def delete_product_type(type_id: int, db: AsyncSession = Depends(get_db)):
+    ptype = await db.get(ProductType, type_id)
+    if not ptype:
+        raise HTTPException(status_code=404, detail="Tipo de produto não encontrado")
+    ptype.active = False
+    return {"deleted": True}
+
+
+@router.get("/products/full-tree")
+async def get_full_product_tree(db: AsyncSession = Depends(get_db)):
+    """
+    Retorna a hierarquia completa (categoria -> produtos -> tipos) numa
+    única chamada — usado pela tela de Knowledge Base para montar os
+    seletores em cascata sem precisar de 3 requisições separadas.
+    """
+    categories = (await db.execute(select(ProductCategory).where(ProductCategory.active == True))).scalars().all()
+    products = (await db.execute(select(Product).where(Product.active == True))).scalars().all()
+    types = (await db.execute(select(ProductType).where(ProductType.active == True))).scalars().all()
+
+    tree = []
+    for cat in categories:
+        cat_products = []
+        for p in [p for p in products if p.category_id == cat.id]:
+            p_types = [{"id": t.id, "type_name": t.type_name} for t in types if t.product_id == p.id]
+            cat_products.append({"id": p.id, "product_name": p.product_name, "types": p_types})
+        tree.append({"id": cat.id, "category_name": cat.category_name, "products": cat_products})
+
+    return {"tree": tree}
 
 
 # -------------------------------------------------------------
@@ -224,7 +312,7 @@ class PackagingAccessoryIn(BaseModel):
     packaging_type: str  # 'goodpack' | 'competitor'
     goodpack_sku_id: int | None = None
     competitor_unit_id: int | None = None
-    product_id: int | None = None  # None = default genérico da embalagem
+    product_type_id: int | None = None  # None = default genérico da embalagem
     accessory_type_id: int
     default_unit_price: float | None = None
     currency: str = "USD"
@@ -255,7 +343,16 @@ async def list_packaging_accessories(
     items = result.scalars().all()
 
     accessory_types = {t.id: t.accessory_name for t in (await db.execute(select(AccessoryType))).scalars().all()}
-    products = {p.id: p.product_name for p in (await db.execute(select(ProductCatalog))).scalars().all()}
+    product_types = {t.id: t for t in (await db.execute(select(ProductType))).scalars().all()}
+    products = {p.id: p for p in (await db.execute(select(Product))).scalars().all()}
+
+    def _product_type_label(product_type_id):
+        if not product_type_id or product_type_id not in product_types:
+            return None
+        pt = product_types[product_type_id]
+        product = products.get(pt.product_id)
+        product_name = product.product_name if product else "?"
+        return f"{product_name} / {pt.type_name}"
 
     return {"packaging_accessories": [
         {
@@ -263,8 +360,8 @@ async def list_packaging_accessories(
             "packaging_type": pa.packaging_type,
             "goodpack_sku_id": pa.goodpack_sku_id,
             "competitor_unit_id": pa.competitor_unit_id,
-            "product_id": pa.product_id,
-            "product_name": products.get(pa.product_id) if pa.product_id else None,
+            "product_type_id": pa.product_type_id,
+            "product_type_label": _product_type_label(pa.product_type_id),
             "accessory_type_id": pa.accessory_type_id,
             "accessory_name": accessory_types.get(pa.accessory_type_id, "—"),
             "default_unit_price": float(pa.default_unit_price) if pa.default_unit_price else None,

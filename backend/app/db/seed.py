@@ -1,6 +1,7 @@
 """
 Popula o banco com dados de referência iniciais — SKUs Goodpack, embalagens
-concorrentes, produtos e a estrutura conhecida de acessórios por embalagem.
+concorrentes, hierarquia de produtos (categoria > produto > tipo), e a
+estrutura conhecida de acessórios por embalagem.
 
 Idempotente: verifica se já existe dado antes de inserir, então pode ser
 chamado a cada inicialização do servidor sem duplicar registros.
@@ -9,7 +10,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
-    GoodpackSKU, CompetitorUnit, ProductCatalog,
+    GoodpackSKU, CompetitorUnit, ProductCategory, Product, ProductType,
     AccessoryType, PackagingAccessory, Region,
 )
 
@@ -33,13 +34,20 @@ COMPETITOR_UNITS = [
     dict(unit_name="Drum 200L", unit_type="drum", volume_liters=200),
 ]
 
-PRODUCTS = [
-    dict(product_name="FCOJ", category_code="CIT", category_name="Citrus Juice Concentrate"),
-    dict(product_name="NFC", category_code="CIT", category_name="Not From Concentrate Juice"),
-    dict(product_name="Omega 3", category_code="FAO", category_name="Fat and Oils"),
-    dict(product_name="Palm Oil", category_code="FAO", category_name="Fat and Oils"),
-    dict(product_name="Purê de tomate", category_code="DAY", category_name="Fruit/Vegetable Derivatives"),
-]
+# Hierarquia: categoria -> {produto -> [tipos]}
+PRODUCT_HIERARCHY = {
+    "Citrus": {
+        "Orange": ["NFC", "FCOJ", "Concentrate"],
+        "Lemon": ["NFC", "Concentrate"],
+    },
+    "Fat and Oils": {
+        "Omega 3": ["Crude", "Refined"],
+        "Palm Oil": ["Crude", "Refined"],
+    },
+    "Fruit/Vegetable Derivatives": {
+        "Tomato": ["Purée", "Paste"],
+    },
+}
 
 ACCESSORY_TYPES = [
     "Pallet", "Poly Liner", "Base Pad", "Aseptic Bag",
@@ -55,13 +63,14 @@ REGIONS = [
     ("MEA", "Middle East & Africa"),
 ]
 
-# Estrutura de acessórios: (packaging_type, sku_or_unit_name, product_name|None, [acessórios])
+# Estrutura de acessórios: (packaging_type, sku_or_unit_name, (produto, tipo)|None, [acessórios])
+# (produto, tipo) = None significa default genérico, válido para qualquer produto/tipo.
 PACKAGING_ACCESSORY_RULES = [
     ("goodpack", "MB4", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
     ("goodpack", "MB5", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
     ("goodpack", "MB6", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
-    ("goodpack", "MB6", "FCOJ", ["Poly Liner"]),
-    ("goodpack", "MB6", "NFC", ["Aseptic Bag"]),
+    ("goodpack", "MB6", ("Orange", "FCOJ"), ["Poly Liner"]),
+    ("goodpack", "MB6", ("Orange", "NFC"), ["Aseptic Bag"]),
     ("competitor", "Drum 200L", None, ["Poly Liner", "Aseptic Bag", "Strapping Cost"]),
     ("competitor", "Octabin", None, ["Pallet", "Poly Liner", "Aseptic Bag", "Strapping Cost", "Dunnage"]),
 ]
@@ -89,12 +98,44 @@ async def seed_initial_data(db: AsyncSession) -> None:
             db.add(CompetitorUnit(**unit_data))
     await db.flush()
 
-    # Products
-    existing_products = (await db.execute(select(ProductCatalog.product_name))).scalars().all()
-    for product_data in PRODUCTS:
-        if product_data["product_name"] not in existing_products:
-            db.add(ProductCatalog(**product_data))
-    await db.flush()
+    # Product hierarchy: category -> product -> type
+    existing_categories = {
+        c.category_name: c.id for c in (await db.execute(select(ProductCategory))).scalars().all()
+    }
+    for category_name in PRODUCT_HIERARCHY:
+        if category_name not in existing_categories:
+            cat = ProductCategory(category_name=category_name)
+            db.add(cat)
+            await db.flush()
+            existing_categories[category_name] = cat.id
+
+    existing_products = {
+        (p.category_id, p.product_name): p.id for p in (await db.execute(select(Product))).scalars().all()
+    }
+    for category_name, products in PRODUCT_HIERARCHY.items():
+        category_id = existing_categories[category_name]
+        for product_name in products:
+            key = (category_id, product_name)
+            if key not in existing_products:
+                prod = Product(category_id=category_id, product_name=product_name)
+                db.add(prod)
+                await db.flush()
+                existing_products[key] = prod.id
+
+    existing_types = {
+        (t.product_id, t.type_name): t.id for t in (await db.execute(select(ProductType))).scalars().all()
+    }
+    for category_name, products in PRODUCT_HIERARCHY.items():
+        category_id = existing_categories[category_name]
+        for product_name, types in products.items():
+            product_id = existing_products[(category_id, product_name)]
+            for type_name in types:
+                key = (product_id, type_name)
+                if key not in existing_types:
+                    pt = ProductType(product_id=product_id, type_name=type_name)
+                    db.add(pt)
+                    await db.flush()
+                    existing_types[key] = pt.id
 
     # Accessory types
     existing_acc_types = (await db.execute(select(AccessoryType.accessory_name))).scalars().all()
@@ -104,18 +145,24 @@ async def seed_initial_data(db: AsyncSession) -> None:
     await db.flush()
 
     # Packaging <-> accessory links — só roda se ainda não há nenhum vínculo
-    # (evita duplicar a cada boot; edições manuais do usuário ficam preservadas)
     existing_links_count = len((await db.execute(select(PackagingAccessory.id))).scalars().all())
     if existing_links_count == 0:
         skus_by_code = {s.sku_code: s.id for s in (await db.execute(select(GoodpackSKU))).scalars().all()}
         units_by_name = {u.unit_name: u.id for u in (await db.execute(select(CompetitorUnit))).scalars().all()}
-        products_by_name = {p.product_name: p.id for p in (await db.execute(select(ProductCatalog))).scalars().all()}
         acc_types_by_name = {a.accessory_name: a.id for a in (await db.execute(select(AccessoryType))).scalars().all()}
 
-        for packaging_type, name, product_name, accessories in PACKAGING_ACCESSORY_RULES:
+        # Lookup reverso: (produto, tipo) -> product_type_id (busca em qualquer categoria)
+        type_lookup = {}
+        all_products = {p.id: p for p in (await db.execute(select(Product))).scalars().all()}
+        all_types = (await db.execute(select(ProductType))).scalars().all()
+        for t in all_types:
+            product_name = all_products[t.product_id].product_name
+            type_lookup[(product_name, t.type_name)] = t.id
+
+        for packaging_type, name, product_type_key, accessories in PACKAGING_ACCESSORY_RULES:
             goodpack_sku_id = skus_by_code.get(name) if packaging_type == "goodpack" else None
             competitor_unit_id = units_by_name.get(name) if packaging_type == "competitor" else None
-            product_id = products_by_name.get(product_name) if product_name else None
+            product_type_id = type_lookup.get(product_type_key) if product_type_key else None
 
             for accessory_name in accessories:
                 accessory_type_id = acc_types_by_name.get(accessory_name)
@@ -125,7 +172,7 @@ async def seed_initial_data(db: AsyncSession) -> None:
                     packaging_type=packaging_type,
                     goodpack_sku_id=goodpack_sku_id,
                     competitor_unit_id=competitor_unit_id,
-                    product_id=product_id,
+                    product_type_id=product_type_id,
                     accessory_type_id=accessory_type_id,
                     confidence_level="validation_required",
                     source_type="interno",
