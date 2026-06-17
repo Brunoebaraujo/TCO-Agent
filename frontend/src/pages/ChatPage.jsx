@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Send, Loader2 } from 'lucide-react'
 import TCOSummaryTable from '../components/tco/TCOSummaryTable'
 
@@ -16,21 +17,76 @@ Pode me dar essas informações de uma vez ou eu te guio passo a passo.`,
 }
 
 export default function ChatPage() {
+  const { analysisId } = useParams()
+  const navigate = useNavigate()
+
   const [messages, setMessages] = useState([WELCOME_MESSAGE])
+  const [sessionId, setSessionId] = useState(analysisId ? Number(analysisId) : null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingSession, setLoadingSession] = useState(Boolean(analysisId))
   const bottomRef = useRef(null)
+
+  useEffect(() => {
+    if (!analysisId) {
+      setMessages([WELCOME_MESSAGE])
+      setSessionId(null)
+      return
+    }
+
+    setLoadingSession(true)
+    fetch(`/api/tco/${analysisId}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Sessão não encontrada')
+        return res.json()
+      })
+      .then(data => {
+        setMessages([WELCOME_MESSAGE, ...data.messages])
+        setSessionId(data.id)
+      })
+      .catch(() => {
+        setMessages([WELCOME_MESSAGE])
+        setSessionId(null)
+        navigate('/chat', { replace: true })
+      })
+      .finally(() => setLoadingSession(false))
+  }, [analysisId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  const persistSession = useCallback(async (allMessages, currentSessionId) => {
+    try {
+      const res = await fetch('/api/tco/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: currentSessionId,
+          messages: allMessages.slice(1).map(m => ({
+            role: m.role,
+            content: m.content,
+            tco_result: m.tco_result ?? null,
+          })),
+        }),
+      })
+      const data = await res.json()
+      if (!currentSessionId && data.session_id) {
+        setSessionId(data.session_id)
+        navigate(`/chat/${data.session_id}`, { replace: true })
+      }
+    } catch (err) {
+      console.error('Falha ao salvar sessão:', err)
+    }
+  }, [navigate])
 
   async function sendMessage(e) {
     e.preventDefault()
     if (!input.trim() || loading) return
 
     const userMessage = { role: 'user', content: input.trim() }
-    setMessages(prev => [...prev, userMessage])
+    const messagesWithUser = [...messages, userMessage]
+    setMessages(messagesWithUser)
     setInput('')
     setLoading(true)
 
@@ -39,17 +95,19 @@ export default function ChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          // Não envia a mensagem de boas-vindas estática (índice 0) — só o histórico real da conversa
           messages: [...messages.slice(1), userMessage],
           opportunity_context: {},
         }),
       })
       const data = await res.json()
-      setMessages(prev => [...prev, {
+      const assistantMessage = {
         role: 'assistant',
         content: data.content,
         tco_result: data.tco_result ?? null,
-      }])
+      }
+      const finalMessages = [...messagesWithUser, assistantMessage]
+      setMessages(finalMessages)
+      await persistSession(finalMessages, sessionId)
     } catch (err) {
       setMessages(prev => [...prev, {
         role: 'assistant',
@@ -60,18 +118,26 @@ export default function ChatPage() {
     }
   }
 
+  if (loadingSession) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 size={20} className="animate-spin text-slate-400" />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
 
-      {/* Header */}
       <div className="px-6 py-4 border-b border-slate-200 bg-white">
-        <h1 className="text-base font-semibold text-slate-800">New TCO Analysis</h1>
+        <h1 className="text-base font-semibold text-slate-800">
+          {sessionId ? 'TCO Analysis' : 'New TCO Analysis'}
+        </h1>
         <p className="text-xs text-slate-400 mt-0.5">
           Talk to the agent to generate a competitive TCO
         </p>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
         {messages.map((msg, i) => (
           <div key={i} className={msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
@@ -106,7 +172,6 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
       <div className="px-6 py-4 border-t border-slate-200 bg-white">
         <form onSubmit={sendMessage} className="flex gap-3">
           <input

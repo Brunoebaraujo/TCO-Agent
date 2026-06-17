@@ -12,6 +12,33 @@ from typing import Optional
 from app.db.database import Base
 
 
+class ChatSession(Base):
+    """
+    Uma sessão de conversa entre o vendedor e o agente TCO.
+    Guarda o histórico bruto de mensagens (JSON) para permitir retomar
+    a conversa exatamente de onde parou, e referencia o tco_result
+    estruturado mais recente gerado nesta sessão (se houver).
+    """
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # Título legível para a listagem do History — derivado da primeira
+    # mensagem do usuário ou do customer_name do tco_result, quando existir.
+    title: Mapped[str] = mapped_column(String(200), default="Nova conversa")
+
+    # Histórico completo de mensagens, serializado como JSON:
+    # [{"role": "user"|"assistant", "content": "...", "tco_result": {...} | null}, ...]
+    messages_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    # Espelha o último tco_result gerado nesta sessão, para exibir
+    # resumo na listagem do History sem precisar reabrir a conversa inteira.
+    last_tco_result_json: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+
+
 class GoodpackSKU(Base):
     __tablename__ = "goodpack_skus"
 
