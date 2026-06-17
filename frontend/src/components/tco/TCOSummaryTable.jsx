@@ -94,11 +94,18 @@ export default function TCOSummaryTable({ result }) {
       {assumptions.length > 0 && (
         <div className="mt-4 pt-3 border-t border-slate-100">
           <p className="text-xs text-slate-400 mb-2">Premissas usadas neste cálculo</p>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {assumptions.map((a, i) => (
-              <div key={i} className="flex items-center justify-between gap-3 text-xs">
-                <span className="text-slate-600">{a.label}</span>
-                <ConfidenceBadge level={a.confidence_level} />
+              <div key={i} className="bg-slate-50 rounded-lg px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-xs text-slate-700 leading-relaxed flex-1">{a.label}</p>
+                  <div className="flex-shrink-0">
+                    <ConfidenceBadge level={a.confidence_level} />
+                  </div>
+                </div>
+                {a.source && (
+                  <p className="text-[11px] text-slate-400 mt-1">Fonte: {a.source}</p>
+                )}
               </div>
             ))}
           </div>

@@ -16,7 +16,7 @@ async def ask_agent(messages: list[dict]) -> str:
     """
     response = await client.messages.create(
         model=settings.claude_model,
-        max_tokens=1024,
+        max_tokens=4096,
         system=SYSTEM_PROMPT,
         messages=messages,
     )
