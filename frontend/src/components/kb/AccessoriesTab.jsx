@@ -13,6 +13,8 @@ export default function AccessoriesTab() {
   const [editingId, setEditingId] = useState(null)
   const [showAddForm, setShowAddForm] = useState(false)
   const [form, setForm] = useState({ accessory_type_id: '', category_id: '', product_id: '', product_type_id: '', default_unit_price: '' })
+  const [showAddPackagingForm, setShowAddPackagingForm] = useState(false)
+  const [newPackagingForm, setNewPackagingForm] = useState({ type: 'goodpack', name: '' })
 
   useEffect(() => {
     Promise.all([
@@ -38,6 +40,42 @@ export default function AccessoriesTab() {
     fetch(`/api/kb/packaging-accessories?${param}=${selectedPackaging.id}`)
       .then(r => r.json())
       .then(data => setItems(data.packaging_accessories ?? []))
+  }
+
+  function reloadPackagingLists() {
+    Promise.all([
+      fetch('/api/kb/skus').then(r => r.json()),
+      fetch('/api/kb/competitors').then(r => r.json()),
+    ]).then(([skuData, compData]) => {
+      setSkus(skuData.skus ?? [])
+      setCompetitors(compData.competitors ?? [])
+    })
+  }
+
+  async function handleAddPackaging() {
+    if (!newPackagingForm.name.trim()) return
+    const endpoint = newPackagingForm.type === 'goodpack' ? '/api/kb/skus' : '/api/kb/competitors'
+    const body = newPackagingForm.type === 'goodpack'
+      ? { sku_code: newPackagingForm.name.trim() }
+      : { unit_name: newPackagingForm.name.trim() }
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => null)
+      alert(err?.detail ?? 'Não foi possível adicionar esta embalagem.')
+      return
+    }
+
+    const data = await res.json()
+    setNewPackagingForm({ type: 'goodpack', name: '' })
+    setShowAddPackagingForm(false)
+    reloadPackagingLists()
+    setSelectedPackaging({ type: newPackagingForm.type, id: data.id, label: newPackagingForm.name.trim() })
   }
 
   useEffect(() => { reload() }, [selectedPackaging])
@@ -125,7 +163,52 @@ export default function AccessoriesTab() {
             {c.unit_name}
           </button>
         ))}
+        <button
+          onClick={() => setShowAddPackagingForm(s => !s)}
+          className="px-3 py-1.5 text-sm rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-slate-400 hover:text-slate-700 flex items-center gap-1"
+        >
+          <Plus size={13} /> Nova embalagem
+        </button>
       </div>
+
+      {showAddPackagingForm && (
+        <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 flex flex-wrap items-end gap-2">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Tipo</label>
+            <select
+              value={newPackagingForm.type}
+              onChange={e => setNewPackagingForm(f => ({ ...f, type: e.target.value }))}
+              className="px-2 py-1.5 text-sm border border-slate-200 rounded-md"
+            >
+              <option value="goodpack">Goodpack (SKU)</option>
+              <option value="competitor">Concorrente</option>
+            </select>
+          </div>
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-xs text-slate-400 mb-1">
+              {newPackagingForm.type === 'goodpack' ? 'Código da SKU (ex: MB7)' : 'Nome da embalagem'}
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={newPackagingForm.name}
+              onChange={e => setNewPackagingForm(f => ({ ...f, name: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter') handleAddPackaging() }}
+              placeholder={newPackagingForm.type === 'goodpack' ? 'Ex: MB7' : 'Ex: Conical Drum'}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-md"
+            />
+          </div>
+          <button
+            onClick={handleAddPackaging}
+            className="px-3 py-1.5 text-sm bg-[#1a3a5c] text-white rounded-md hover:bg-[#1a3a5c]/90"
+          >
+            Adicionar
+          </button>
+          <p className="text-xs text-slate-400 w-full mt-1">
+            Specs físicas (volume, peso) podem ser completadas depois — o cadastro inicial só precisa do nome.
+          </p>
+        </div>
+      )}
 
       {selectedPackaging && (
         <div className="bg-white border border-slate-200 rounded-xl p-4">

@@ -32,6 +32,18 @@ GOODPACK_SKUS = [
 COMPETITOR_UNITS = [
     dict(unit_name="Octabin", unit_type="bin"),
     dict(unit_name="Drum 200L", unit_type="drum", volume_liters=200),
+    # Adicionadas em 17/06/2026 a pedido do usuário — apenas nome por agora,
+    # tipo/capacidade a confirmar.
+    dict(unit_name="Blue Ocean Container 1000"),
+    dict(unit_name="Blue Ocean Container 1250"),
+    dict(unit_name="Bottle in cage"),
+    dict(unit_name="Conical Drum"),
+    dict(unit_name="Cylindrical Drum"),
+    dict(unit_name="GPS Container"),
+    dict(unit_name="Schoeller Arca bin"),
+    dict(unit_name="Wooden Pallet"),
+    dict(unit_name="Plastic Pallet"),
+    dict(unit_name="Wooden Bin"),
 ]
 
 # Hierarquia: categoria -> {produto -> [tipos]}

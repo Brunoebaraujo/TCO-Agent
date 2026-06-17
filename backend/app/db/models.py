@@ -46,9 +46,12 @@ class GoodpackSKU(Base):
     sku_code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
 
-    volume_liters: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
-    max_payload_kg: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
-    tare_weight_kg: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
+    # Specs físicas — opcionais para permitir cadastrar a SKU pelo nome
+    # primeiro (ex: a partir de uma lista) e completar os números depois,
+    # sem bloquear o cadastro inicial.
+    volume_liters: Mapped[Optional[float]] = mapped_column(Numeric(8, 2))
+    max_payload_kg: Mapped[Optional[float]] = mapped_column(Numeric(8, 2))
+    tare_weight_kg: Mapped[Optional[float]] = mapped_column(Numeric(8, 2))
 
     stack_full_warehouse: Mapped[Optional[int]] = mapped_column(Integer)
     stack_empty_warehouse: Mapped[Optional[int]] = mapped_column(Integer)

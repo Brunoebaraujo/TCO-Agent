@@ -17,8 +17,16 @@ router = APIRouter()
 
 
 # -------------------------------------------------------------
-# SKUs Goodpack (somente leitura por agora — specs vêm dos TDS oficiais)
+# SKUs Goodpack
 # -------------------------------------------------------------
+
+class GoodpackSKUIn(BaseModel):
+    sku_code: str
+    description: str | None = None
+    volume_liters: float | None = None
+    max_payload_kg: float | None = None
+    tare_weight_kg: float | None = None
+
 
 @router.get("/skus")
 async def list_skus(db: AsyncSession = Depends(get_db)):
@@ -27,10 +35,41 @@ async def list_skus(db: AsyncSession = Depends(get_db)):
     return {"skus": [
         {
             "id": s.id, "sku_code": s.sku_code, "description": s.description,
-            "volume_liters": float(s.volume_liters), "max_payload_kg": float(s.max_payload_kg),
+            "volume_liters": float(s.volume_liters) if s.volume_liters else None,
+            "max_payload_kg": float(s.max_payload_kg) if s.max_payload_kg else None,
         }
         for s in skus
     ]}
+
+
+@router.post("/skus")
+async def create_sku(payload: GoodpackSKUIn, db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(select(GoodpackSKU).where(GoodpackSKU.sku_code == payload.sku_code))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Já existe uma SKU com o código '{payload.sku_code}'")
+    sku = GoodpackSKU(**payload.model_dump())
+    db.add(sku)
+    await db.flush()
+    return {"id": sku.id}
+
+
+@router.put("/skus/{sku_id}")
+async def update_sku(sku_id: int, payload: GoodpackSKUIn, db: AsyncSession = Depends(get_db)):
+    sku = await db.get(GoodpackSKU, sku_id)
+    if not sku:
+        raise HTTPException(status_code=404, detail="SKU não encontrada")
+    for k, v in payload.model_dump().items():
+        setattr(sku, k, v)
+    return {"updated": True}
+
+
+@router.delete("/skus/{sku_id}")
+async def delete_sku(sku_id: int, db: AsyncSession = Depends(get_db)):
+    sku = await db.get(GoodpackSKU, sku_id)
+    if not sku:
+        raise HTTPException(status_code=404, detail="SKU não encontrada")
+    sku.active = False
+    return {"deleted": True}
 
 
 # -------------------------------------------------------------
@@ -61,6 +100,9 @@ async def list_competitors(db: AsyncSession = Depends(get_db)):
 
 @router.post("/competitors")
 async def create_competitor(payload: CompetitorUnitIn, db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(select(CompetitorUnit).where(CompetitorUnit.unit_name == payload.unit_name))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Já existe uma embalagem com o nome '{payload.unit_name}'")
     unit = CompetitorUnit(**payload.model_dump())
     db.add(unit)
     await db.flush()
