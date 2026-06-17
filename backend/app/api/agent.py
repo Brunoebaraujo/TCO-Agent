@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.agent.client import ask_agent
+from app.agent.tco_parser import extract_tco_result
 
 router = APIRouter()
 
@@ -25,9 +26,12 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """
     Endpoint principal de conversa com o agente TCO.
     Recebe o histórico de mensagens e retorna a resposta do agente.
+
+    Se o agente gerou um resultado de TCO estruturado (bloco TCO_RESULT),
+    ele é extraído e retornado separadamente em `tco_result`, para que o
+    frontend renderize a tabela/gráfico em vez de texto cru.
     """
     try:
-        # Filtra a mensagem de boas-vindas inicial do frontend (não faz parte do histórico real da API)
         history = [
             {"role": m.role, "content": m.content}
             for m in request.messages
@@ -35,11 +39,16 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         ]
 
         if not history or history[0]["role"] != "user":
-            # A API exige que a conversa comece com role="user"
             history = [m for m in history if m["role"] == "user"] or history
 
-        reply_text = await ask_agent(history)
-        return {"role": "assistant", "content": reply_text}
+        raw_reply = await ask_agent(history)
+        clean_text, tco_result = extract_tco_result(raw_reply)
+
+        return {
+            "role": "assistant",
+            "content": clean_text,
+            "tco_result": tco_result,  # None se o agente não gerou um resultado nesta resposta
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao chamar o agente: {str(e)}")

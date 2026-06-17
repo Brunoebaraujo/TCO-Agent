@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Send, Loader2 } from 'lucide-react'
-import ConfidenceBadge from '../components/ui/ConfidenceBadge'
+import TCOSummaryTable from '../components/tco/TCOSummaryTable'
 
 const WELCOME_MESSAGE = {
   role: 'assistant',
@@ -45,7 +45,11 @@ export default function ChatPage() {
         }),
       })
       const data = await res.json()
-      setMessages(prev => [...prev, { role: 'assistant', content: data.content }])
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.content,
+        tco_result: data.tco_result ?? null,
+      }])
     } catch (err) {
       setMessages(prev => [...prev, {
         role: 'assistant',
@@ -76,8 +80,13 @@ export default function ChatPage() {
                 <span className="text-white text-xs font-bold">G</span>
               </div>
             )}
-            <div className={msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-agent'}>
-              <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+            <div className={msg.role === 'user' ? '' : 'flex flex-col gap-3'}>
+              {msg.content && (
+                <div className={msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-agent'}>
+                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                </div>
+              )}
+              {msg.tco_result && <TCOSummaryTable result={msg.tco_result} />}
             </div>
           </div>
         ))}
