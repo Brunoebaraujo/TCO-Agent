@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import ConfidenceBadge from '../ui/ConfidenceBadge'
 
 function formatCurrency(value, currency = 'USD') {
@@ -9,6 +10,57 @@ function formatCurrency(value, currency = 'USD') {
 }
 
 export default function TCOSummaryTable({ result }) {
+  const chartRef = useRef(null)
+  const chartInstanceRef = useRef(null)
+
+  const categories = result?.categories ?? []
+  const competitorName = result?.competitor_name ?? 'Concorrente'
+
+  useEffect(() => {
+    if (!result || !chartRef.current || categories.length === 0) return
+
+    // Destroi gráfico anterior antes de criar um novo (evita memory leak em re-renders)
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy()
+    }
+
+    chartInstanceRef.current = new window.Chart(chartRef.current, {
+      type: 'bar',
+      data: {
+        labels: categories.map(c => c.label),
+        datasets: [
+          {
+            label: 'Goodpack',
+            data: categories.map(c => c.goodpack),
+            backgroundColor: '#1D9E75',
+          },
+          {
+            label: competitorName,
+            data: categories.map(c => c.competitor),
+            backgroundColor: '#888780',
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: {
+            ticks: { callback: (v) => '$' + v },
+          },
+        },
+      },
+    })
+
+    return () => {
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.destroy()
+        chartInstanceRef.current = null
+      }
+    }
+  }, [result])
+
   if (!result) return null
 
   const {
@@ -18,7 +70,6 @@ export default function TCOSummaryTable({ result }) {
     competitor_name,
     simulated_metric_tonnes,
     currency = 'USD',
-    categories = [],
     goodpack_total_per_mt,
     competitor_total_per_mt,
     total_saving,
@@ -71,6 +122,27 @@ export default function TCOSummaryTable({ result }) {
           <div className="text-right text-emerald-600">
             {formatCurrency(competitor_total_per_mt - goodpack_total_per_mt, currency)}
           </div>
+        </div>
+      </div>
+
+      {/* Gráfico comparativo */}
+      <div className="mt-4 pt-4 border-t border-slate-100">
+        <div className="flex gap-4 text-xs text-slate-500 mb-2">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#1D9E75' }} />
+            Goodpack
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#888780' }} />
+            {competitor_name}
+          </span>
+        </div>
+        <div style={{ position: 'relative', height: '220px' }}>
+          <canvas
+            ref={chartRef}
+            role="img"
+            aria-label={`Gráfico de barras comparando custo por categoria entre Goodpack e ${competitor_name}`}
+          />
         </div>
       </div>
 

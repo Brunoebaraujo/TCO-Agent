@@ -43,6 +43,43 @@ class GoodpackSKU(Base):
     updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
 
 
+class AccessoryType(Base):
+    __tablename__ = "accessory_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    accessory_name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class PackagingAccessory(Base):
+    __tablename__ = "packaging_accessories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    packaging_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    goodpack_sku_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goodpack_skus.id"))
+    competitor_unit_id: Mapped[Optional[int]] = mapped_column(ForeignKey("competitor_units.id"))
+
+    accessory_type_id: Mapped[int] = mapped_column(ForeignKey("accessory_types.id"), nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    default_unit_price: Mapped[Optional[float]] = mapped_column(Numeric(8, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    region: Mapped[str] = mapped_column(String(20), default="GLOBAL")
+
+    collected_at: Mapped[Optional[date]] = mapped_column(Date)
+    valid_until: Mapped[Optional[date]] = mapped_column(Date)
+    source_type: Mapped[Optional[str]] = mapped_column(String(50))
+    source_detail: Mapped[Optional[str]] = mapped_column(Text)
+    collected_by: Mapped[Optional[str]] = mapped_column(String(100))
+    confidence_level: Mapped[str] = mapped_column(String(30), default="validation_required")
+
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    accessory_type: Mapped["AccessoryType"] = relationship()
+
+
 class CompetitorUnit(Base):
     __tablename__ = "competitor_units"
 

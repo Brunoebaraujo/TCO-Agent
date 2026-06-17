@@ -367,30 +367,123 @@ COMMENT ON TABLE product_catalog IS
 
 
 -- -------------------------------------------------------------
--- 7. ACESSÓRIOS GOODPACK (preços de referência global)
+-- 7A. CATÁLOGO DE ACESSÓRIOS (o que existe)
 -- -------------------------------------------------------------
--- Itens como Aseptic Bag, Poly Liner, Base Pad, etc.
--- Preços mudam menos que concorrentes mas também precisam de rastreabilidade.
+-- Lista mestre de tipos de acessório, independente de qual embalagem usa.
+-- Ex: Poly Liner, Aseptic Bag, Base Pad, Pallet, Strapping, Dunnage, Lid.
 
-CREATE TABLE goodpack_accessories (
+CREATE TABLE accessory_types (
     id                      SERIAL PRIMARY KEY,
-    accessory_name          VARCHAR(100)    NOT NULL,         -- 'Aseptic Bag', 'Poly Liner'
-    unit_price              NUMERIC(8,2)    NOT NULL,
-    currency                VARCHAR(3)      DEFAULT 'USD',
-    region                  VARCHAR(50)     DEFAULT 'global',
-    collected_at            DATE            NOT NULL,
-    valid_until             DATE,
-    source_type             VARCHAR(50),
-    source_detail           TEXT,
-    collected_by            VARCHAR(100),
-    confidence_level        VARCHAR(30)     DEFAULT 'verified'
-                                CHECK (confidence_level IN ('verified','high_confidence','validation_required')),
-    is_current              BOOLEAN DEFAULT TRUE,
-    created_at              TIMESTAMPTZ DEFAULT NOW()
+    accessory_name          VARCHAR(100)    NOT NULL UNIQUE,   -- 'Aseptic Bag', 'Poly Liner', 'Base Pad'...
+    description             TEXT,
+    active                  BOOLEAN DEFAULT TRUE
 );
 
-COMMENT ON TABLE goodpack_accessories IS
-    'Preços de acessórios Goodpack (liners, bags, pads). Rastreados com data/fonte.';
+INSERT INTO accessory_types (accessory_name) VALUES
+    ('Pallet'), ('Poly Liner'), ('Base Pad'), ('Aseptic Bag'),
+    ('Strapping Cost'), ('Lid'), ('Dunnage'), ('Top Sheet'), ('FIBC');
+
+COMMENT ON TABLE accessory_types IS
+    'Catálogo mestre de tipos de acessório de embalagem. Cada embalagem usa um
+     subconjunto destes, definido em packaging_accessories.';
+
+
+-- -------------------------------------------------------------
+-- 7B. VÍNCULO EMBALAGEM ↔ ACESSÓRIO (o que cada embalagem usa)
+-- -------------------------------------------------------------
+-- Define QUAIS acessórios cada embalagem (Goodpack ou concorrente) usa por padrão.
+-- O preço de cada acessório é rastreado separadamente (com fonte/data), pois muda
+-- por oportunidade e precisa de confidence_level próprio.
+-- packaging_type/packaging_id aponta para goodpack_skus OU competitor_units.
+
+CREATE TABLE packaging_accessories (
+    id                      SERIAL PRIMARY KEY,
+
+    -- A qual embalagem este vínculo se refere
+    packaging_type          VARCHAR(20)     NOT NULL CHECK (packaging_type IN ('goodpack','competitor')),
+    goodpack_sku_id         INTEGER         REFERENCES goodpack_skus(id),
+    competitor_unit_id      INTEGER         REFERENCES competitor_units(id),
+
+    -- Qual acessório
+    accessory_type_id       INTEGER         NOT NULL REFERENCES accessory_types(id),
+    is_default               BOOLEAN        DEFAULT TRUE,      -- faz parte do padrão dessa embalagem?
+
+    -- Preço default — separado do uso real em cada TCO (que fica em tco_assumption_details)
+    default_unit_price      NUMERIC(8,2),
+    currency                VARCHAR(3)      DEFAULT 'USD',
+    region                  VARCHAR(20)     DEFAULT 'GLOBAL' REFERENCES regions(region_code),
+
+    -- Rastreabilidade do preço default
+    collected_at             DATE,
+    valid_until               DATE,
+    source_type               VARCHAR(50),
+    source_detail             TEXT,
+    collected_by              VARCHAR(100),
+    confidence_level          VARCHAR(30)    DEFAULT 'validation_required'
+                                  CHECK (confidence_level IN ('verified','high_confidence','validation_required')),
+
+    is_current                BOOLEAN        DEFAULT TRUE,
+    created_at                 TIMESTAMPTZ    DEFAULT NOW(),
+
+    CONSTRAINT chk_packaging_ref CHECK (
+        (packaging_type = 'goodpack' AND goodpack_sku_id IS NOT NULL AND competitor_unit_id IS NULL)
+        OR
+        (packaging_type = 'competitor' AND competitor_unit_id IS NOT NULL AND goodpack_sku_id IS NULL)
+    )
+);
+
+COMMENT ON TABLE packaging_accessories IS
+    'Define quais acessórios cada embalagem (Goodpack ou concorrente) usa por padrão,
+     e o preço default de cada um, com rastreabilidade própria. O agente consulta esta
+     tabela para saber QUAIS acessórios perguntar ao vendedor para uma dada embalagem —
+     nunca assume "sem acessórios" silenciosamente.';
+
+CREATE INDEX idx_packaging_accessories_goodpack
+    ON packaging_accessories (goodpack_sku_id, is_current) WHERE goodpack_sku_id IS NOT NULL;
+CREATE INDEX idx_packaging_accessories_competitor
+    ON packaging_accessories (competitor_unit_id, is_current) WHERE competitor_unit_id IS NOT NULL;
+
+
+-- -------------------------------------------------------------
+-- DADOS INICIAIS — packaging_accessories
+-- -------------------------------------------------------------
+-- Estrutura (QUAIS acessórios) confirmada pelo usuário em 17/06/2026.
+-- Preços DEFAULT ainda não confirmados — confidence_level = validation_required
+-- até que valores reais sejam informados. O agente deve perguntar o preço
+-- de cada acessório listado aqui sempre que gerar um TCO com esta embalagem.
+
+-- MB6: Aseptic Bag, Base Pad, Strapping Cost
+INSERT INTO packaging_accessories (packaging_type, goodpack_sku_id, accessory_type_id, region, confidence_level, source_type, source_detail, collected_at)
+SELECT 'goodpack', sku.id, acc.id, 'GLOBAL', 'validation_required', 'interno',
+       'Estrutura confirmada pelo usuário (17/06/2026) — preço pendente de definição', '2026-06-17'
+FROM goodpack_skus sku, accessory_types acc
+WHERE sku.sku_code = 'MB6' AND acc.accessory_name IN ('Aseptic Bag', 'Base Pad', 'Strapping Cost');
+
+-- MB4 e MB5: mesmo padrão do MB6 (confirmado pelo usuário)
+INSERT INTO packaging_accessories (packaging_type, goodpack_sku_id, accessory_type_id, region, confidence_level, source_type, source_detail, collected_at)
+SELECT 'goodpack', sku.id, acc.id, 'GLOBAL', 'validation_required', 'interno',
+       'Estrutura confirmada pelo usuário (17/06/2026) — mesmo padrão do MB6, preço pendente', '2026-06-17'
+FROM goodpack_skus sku, accessory_types acc
+WHERE sku.sku_code IN ('MB4', 'MB5') AND acc.accessory_name IN ('Aseptic Bag', 'Base Pad', 'Strapping Cost');
+
+-- Drum de aço 200L: Poly Liner, Aseptic Bag, Strapping Cost
+INSERT INTO packaging_accessories (packaging_type, competitor_unit_id, accessory_type_id, region, confidence_level, source_type, source_detail, collected_at)
+SELECT 'competitor', cu.id, acc.id, 'GLOBAL', 'validation_required', 'interno',
+       'Estrutura confirmada pelo usuário (17/06/2026) — preço pendente de definição', '2026-06-17'
+FROM competitor_units cu, accessory_types acc
+WHERE cu.unit_name = 'Drum 200L' AND acc.accessory_name IN ('Poly Liner', 'Aseptic Bag', 'Strapping Cost');
+
+-- Octabin: Pallet, Poly Liner, Aseptic Bag, Strapping Cost, Dunnage
+INSERT INTO packaging_accessories (packaging_type, competitor_unit_id, accessory_type_id, region, confidence_level, source_type, source_detail, collected_at)
+SELECT 'competitor', cu.id, acc.id, 'GLOBAL', 'validation_required', 'interno',
+       'Estrutura confirmada pelo usuário (17/06/2026) — preço pendente de definição', '2026-06-17'
+FROM competitor_units cu, accessory_types acc
+WHERE cu.unit_name = 'Octabin' AND acc.accessory_name IN ('Pallet', 'Poly Liner', 'Aseptic Bag', 'Strapping Cost', 'Dunnage');
+
+COMMENT ON TABLE packaging_accessories IS
+    'Nota de implantação: os INSERTs acima assumem que goodpack_skus já contém MB4/MB5/MB6
+     e competitor_units já contém "Drum 200L" e "Octabin" antes deste script rodar.
+     Se os nomes exatos forem diferentes, ajustar o WHERE antes de popular o banco.';
 
 
 -- -------------------------------------------------------------
