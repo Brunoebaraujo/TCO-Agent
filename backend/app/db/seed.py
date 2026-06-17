@@ -15,18 +15,43 @@ from app.db.models import (
 )
 
 GOODPACK_SKUS = [
+    dict(sku_code="MB3", description="Stackable steel container — 1.40 m³",
+         volume_liters=1400, max_payload_kg=1550, tare_weight_kg=124,
+         stack_full_warehouse=4, stack_empty_warehouse=80, stack_full_transit=2,
+         qty_20ft_dry=16, qty_40ft_dry=32, qty_40ft_hc_dry=32,
+         special_features="Stacking flaps for stacking",
+         tds_document_ref="GP TDS MB3 May02/2021"),
     dict(sku_code="MB4", description="Stackable steel container — 1.40 m³",
          volume_liters=1400, max_payload_kg=1550, tare_weight_kg=120,
          stack_full_warehouse=4, stack_empty_warehouse=72, stack_full_transit=2,
-         qty_20ft_dry=16, qty_40ft_dry=32, tds_document_ref="GP TDS MB4 Mar24/2022"),
+         qty_20ft_dry=16, qty_40ft_dry=32, qty_40ft_hc_dry=32,
+         special_features="Single-sided bottom discharge hole, stacking flaps for stacking",
+         tds_document_ref="GP TDS MB4 Mar24/2022"),
     dict(sku_code="MB5", description="Stackable steel container — 1.60 m³",
          volume_liters=1600, max_payload_kg=1650, tare_weight_kg=132,
          stack_full_warehouse=5, stack_empty_warehouse=96, stack_full_transit=2,
-         qty_20ft_dry=16, qty_40ft_dry=32, tds_document_ref="GP TDS MB5 May02/2021"),
+         qty_20ft_dry=16, qty_40ft_dry=32,
+         is_collapsible=True, special_features="Removable sidewall",
+         tds_document_ref="GP TDS MB5 May02/2021"),
+    dict(sku_code="MB5H", description="Stackable steel container — 1.60 m³ — automotive components",
+         volume_liters=1600, max_payload_kg=1400, tare_weight_kg=133,
+         stack_full_warehouse=5, stack_empty_warehouse=96, stack_full_transit=2,
+         qty_20ft_dry=16, qty_40ft_dry=32,
+         is_collapsible=True, special_features="Removable sidewall, foldable half-sidewall",
+         tds_document_ref="GP TDS MB5H May03/2021"),
     dict(sku_code="MB6", description="Stackable steel container — 1.25 m³",
          volume_liters=1250, max_payload_kg=1650, tare_weight_kg=115,
          stack_full_warehouse=5, stack_empty_warehouse=80, stack_full_transit=2,
-         qty_20ft_dry=16, qty_40ft_dry=36, tds_document_ref="GP TDS MB6 Feb27/2023"),
+         qty_20ft_dry=16, qty_40ft_dry=36, qty_40ft_hc_dry=198,
+         is_collapsible=True, special_features="Integrated lid, removable sidewalls (all four)",
+         tds_document_ref="GP TDS MB6 Feb27/2023"),
+    dict(sku_code="MB12", description="Stackable steel container — 728 L — automotive industry",
+         volume_liters=728, max_payload_kg=900, tare_weight_kg=65,
+         stack_full_warehouse=6, stack_empty_warehouse=90, stack_full_transit=3,
+         qty_20ft_dry=20, qty_40ft_dry=48, qty_40ft_hc_dry=72,
+         is_collapsible=True,
+         special_features="Two removable sidewalls (one foldable), 2-part folding lid, two document pouches. Limited availability.",
+         tds_document_ref="GP TDS MB12 May03/2021"),
 ]
 
 COMPETITOR_UNITS = [
@@ -78,9 +103,12 @@ REGIONS = [
 # Estrutura de acessórios: (packaging_type, sku_or_unit_name, (produto, tipo)|None, [acessórios])
 # (produto, tipo) = None significa default genérico, válido para qualquer produto/tipo.
 PACKAGING_ACCESSORY_RULES = [
+    ("goodpack", "MB3", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
     ("goodpack", "MB4", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
     ("goodpack", "MB5", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
+    ("goodpack", "MB5H", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
     ("goodpack", "MB6", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
+    ("goodpack", "MB12", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
     ("goodpack", "MB6", ("Orange", "FCOJ"), ["Poly Liner"]),
     ("goodpack", "MB6", ("Orange", "NFC"), ["Aseptic Bag"]),
     ("competitor", "Drum 200L", None, ["Poly Liner", "Aseptic Bag", "Strapping Cost"]),
@@ -96,10 +124,18 @@ async def seed_initial_data(db: AsyncSession) -> None:
             db.add(Region(region_code=code, region_name=name))
     await db.flush()
 
-    # Goodpack SKUs
-    existing_skus = (await db.execute(select(GoodpackSKU.sku_code))).scalars().all()
+    # Goodpack SKUs — upsert: atualiza specs se a SKU já existe (mantendo o
+    # mesmo id, para não quebrar vínculos em packaging_accessories), cria se
+    # não existir. SKUs criadas manualmente pelo usuário via UI (fora desta
+    # lista) nunca são tocadas.
+    existing_skus = {s.sku_code: s for s in (await db.execute(select(GoodpackSKU))).scalars().all()}
     for sku_data in GOODPACK_SKUS:
-        if sku_data["sku_code"] not in existing_skus:
+        code = sku_data["sku_code"]
+        if code in existing_skus:
+            sku = existing_skus[code]
+            for field, value in sku_data.items():
+                setattr(sku, field, value)
+        else:
             db.add(GoodpackSKU(**sku_data))
     await db.flush()
 
@@ -156,39 +192,49 @@ async def seed_initial_data(db: AsyncSession) -> None:
             db.add(AccessoryType(accessory_name=name))
     await db.flush()
 
-    # Packaging <-> accessory links — só roda se ainda não há nenhum vínculo
-    existing_links_count = len((await db.execute(select(PackagingAccessory.id))).scalars().all())
-    if existing_links_count == 0:
-        skus_by_code = {s.sku_code: s.id for s in (await db.execute(select(GoodpackSKU))).scalars().all()}
-        units_by_name = {u.unit_name: u.id for u in (await db.execute(select(CompetitorUnit))).scalars().all()}
-        acc_types_by_name = {a.accessory_name: a.id for a in (await db.execute(select(AccessoryType))).scalars().all()}
+    # Packaging <-> accessory links — verificado por embalagem específica
+    # (não pela tabela inteira), para que adicionar uma SKU nova ao código
+    # (ex: MB3, MB5H, MB12) continue populando seus defaults mesmo que
+    # outras embalagens já tenham vínculos cadastrados/editados manualmente.
+    skus_by_code = {s.sku_code: s.id for s in (await db.execute(select(GoodpackSKU))).scalars().all()}
+    units_by_name = {u.unit_name: u.id for u in (await db.execute(select(CompetitorUnit))).scalars().all()}
+    acc_types_by_name = {a.accessory_name: a.id for a in (await db.execute(select(AccessoryType))).scalars().all()}
 
-        # Lookup reverso: (produto, tipo) -> product_type_id (busca em qualquer categoria)
-        type_lookup = {}
-        all_products = {p.id: p for p in (await db.execute(select(Product))).scalars().all()}
-        all_types = (await db.execute(select(ProductType))).scalars().all()
-        for t in all_types:
-            product_name = all_products[t.product_id].product_name
-            type_lookup[(product_name, t.type_name)] = t.id
+    type_lookup = {}
+    all_products = {p.id: p for p in (await db.execute(select(Product))).scalars().all()}
+    all_types = (await db.execute(select(ProductType))).scalars().all()
+    for t in all_types:
+        product_name = all_products[t.product_id].product_name
+        type_lookup[(product_name, t.type_name)] = t.id
 
-        for packaging_type, name, product_type_key, accessories in PACKAGING_ACCESSORY_RULES:
-            goodpack_sku_id = skus_by_code.get(name) if packaging_type == "goodpack" else None
-            competitor_unit_id = units_by_name.get(name) if packaging_type == "competitor" else None
-            product_type_id = type_lookup.get(product_type_key) if product_type_key else None
+    existing_combinations = set(
+        (pa.packaging_type, pa.goodpack_sku_id, pa.competitor_unit_id, pa.product_type_id, pa.accessory_type_id)
+        for pa in (await db.execute(select(PackagingAccessory))).scalars().all()
+    )
 
-            for accessory_name in accessories:
-                accessory_type_id = acc_types_by_name.get(accessory_name)
-                if not accessory_type_id:
-                    continue
-                db.add(PackagingAccessory(
-                    packaging_type=packaging_type,
-                    goodpack_sku_id=goodpack_sku_id,
-                    competitor_unit_id=competitor_unit_id,
-                    product_type_id=product_type_id,
-                    accessory_type_id=accessory_type_id,
-                    confidence_level="validation_required",
-                    source_type="interno",
-                    source_detail="Estrutura inicial — preço pendente de confirmação",
-                    collected_at=date.today(),
-                ))
+    for packaging_type, name, product_type_key, accessories in PACKAGING_ACCESSORY_RULES:
+        goodpack_sku_id = skus_by_code.get(name) if packaging_type == "goodpack" else None
+        competitor_unit_id = units_by_name.get(name) if packaging_type == "competitor" else None
+        product_type_id = type_lookup.get(product_type_key) if product_type_key else None
+
+        for accessory_name in accessories:
+            accessory_type_id = acc_types_by_name.get(accessory_name)
+            if not accessory_type_id:
+                continue
+
+            combo = (packaging_type, goodpack_sku_id, competitor_unit_id, product_type_id, accessory_type_id)
+            if combo in existing_combinations:
+                continue  # já existe exatamente esta combinação — não duplica
+
+            db.add(PackagingAccessory(
+                packaging_type=packaging_type,
+                goodpack_sku_id=goodpack_sku_id,
+                competitor_unit_id=competitor_unit_id,
+                product_type_id=product_type_id,
+                accessory_type_id=accessory_type_id,
+                confidence_level="validation_required",
+                source_type="interno",
+                source_detail="Estrutura inicial — preço pendente de confirmação",
+                collected_at=date.today(),
+            ))
     await db.flush()
