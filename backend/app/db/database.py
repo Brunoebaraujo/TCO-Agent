@@ -49,9 +49,14 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    """Cria as tabelas se não existirem. Funciona tanto em SQLite quanto Postgres."""
+    """Cria as tabelas se não existirem, e popula dados de referência iniciais."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    from app.db.seed import seed_initial_data
+    async with AsyncSessionLocal() as session:
+        await seed_initial_data(session)
+        await session.commit()
 
 
 async def get_db():

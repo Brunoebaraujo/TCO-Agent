@@ -87,6 +87,11 @@ class PackagingAccessory(Base):
     goodpack_sku_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goodpack_skus.id"))
     competitor_unit_id: Mapped[Optional[int]] = mapped_column(ForeignKey("competitor_units.id"))
 
+    # NULL = vale para qualquer produto (default genérico da embalagem).
+    # Preenchido = vale especificamente para essa combinação embalagem+produto
+    # (ex: MB6 + FCOJ usa Poly Liner; MB6 + NFC usa Aseptic Bag).
+    product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_catalog.id"))
+
     accessory_type_id: Mapped[int] = mapped_column(ForeignKey("accessory_types.id"), nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -105,6 +110,7 @@ class PackagingAccessory(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     accessory_type: Mapped["AccessoryType"] = relationship()
+    product: Mapped[Optional["ProductCatalog"]] = relationship()
 
 
 class CompetitorUnit(Base):

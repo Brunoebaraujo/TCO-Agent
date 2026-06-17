@@ -365,6 +365,16 @@ CREATE TABLE product_catalog (
 COMMENT ON TABLE product_catalog IS
     'Catálogo de produtos transportados e suas categorias. Orienta sugestão de SKU Goodpack.';
 
+-- Produtos iniciais — expandir conforme oportunidades reais surgirem.
+-- FCOJ e NFC incluídos por serem usados no exemplo de especialização de
+-- acessórios por produto (ver packaging_accessories mais abaixo).
+INSERT INTO product_catalog (product_name, category_code, category_name) VALUES
+    ('FCOJ', 'CIT', 'Citrus Juice Concentrate'),
+    ('NFC', 'CIT', 'Not From Concentrate Juice'),
+    ('Omega 3', 'FAO', 'Fat and Oils'),
+    ('Palm Oil', 'FAO', 'Fat and Oils'),
+    ('Purê de tomate', 'DAY', 'Dairy and Fruit/Vegetable Derivatives');
+
 
 -- -------------------------------------------------------------
 -- 7A. CATÁLOGO DE ACESSÓRIOS (o que existe)
@@ -404,6 +414,12 @@ CREATE TABLE packaging_accessories (
     goodpack_sku_id         INTEGER         REFERENCES goodpack_skus(id),
     competitor_unit_id      INTEGER         REFERENCES competitor_units(id),
 
+    -- NULL = vale para qualquer produto (default genérico da embalagem).
+    -- Preenchido = vale especificamente para essa combinação embalagem+produto.
+    -- Ex: MB6 + FCOJ usa Poly Liner; MB6 + NFC usa Aseptic Bag — duas linhas
+    -- diferentes aqui, mesma embalagem, produtos diferentes.
+    product_id               INTEGER        REFERENCES product_catalog(id),
+
     -- Qual acessório
     accessory_type_id       INTEGER         NOT NULL REFERENCES accessory_types(id),
     is_default               BOOLEAN        DEFAULT TRUE,      -- faz parte do padrão dessa embalagem?
@@ -434,14 +450,15 @@ CREATE TABLE packaging_accessories (
 
 COMMENT ON TABLE packaging_accessories IS
     'Define quais acessórios cada embalagem (Goodpack ou concorrente) usa por padrão,
-     e o preço default de cada um, com rastreabilidade própria. O agente consulta esta
-     tabela para saber QUAIS acessórios perguntar ao vendedor para uma dada embalagem —
-     nunca assume "sem acessórios" silenciosamente.';
+     opcionalmente específico por produto (product_id), e o preço default de cada um,
+     com rastreabilidade própria. Lógica de busca do agente: primeiro tenta
+     embalagem+produto específico; se não encontrar, cai para embalagem+product_id NULL
+     (default genérico). O agente NUNCA assume "sem acessórios" silenciosamente.';
 
 CREATE INDEX idx_packaging_accessories_goodpack
-    ON packaging_accessories (goodpack_sku_id, is_current) WHERE goodpack_sku_id IS NOT NULL;
+    ON packaging_accessories (goodpack_sku_id, product_id, is_current) WHERE goodpack_sku_id IS NOT NULL;
 CREATE INDEX idx_packaging_accessories_competitor
-    ON packaging_accessories (competitor_unit_id, is_current) WHERE competitor_unit_id IS NOT NULL;
+    ON packaging_accessories (competitor_unit_id, product_id, is_current) WHERE competitor_unit_id IS NOT NULL;
 
 
 -- -------------------------------------------------------------
@@ -479,6 +496,28 @@ SELECT 'competitor', cu.id, acc.id, 'GLOBAL', 'validation_required', 'interno',
        'Estrutura confirmada pelo usuário (17/06/2026) — preço pendente de definição', '2026-06-17'
 FROM competitor_units cu, accessory_types acc
 WHERE cu.unit_name = 'Octabin' AND acc.accessory_name IN ('Pallet', 'Poly Liner', 'Aseptic Bag', 'Strapping Cost', 'Dunnage');
+
+-- -------------------------------------------------------------
+-- EXEMPLO DE ESPECIALIZAÇÃO POR PRODUTO
+-- -------------------------------------------------------------
+-- Mencionado pelo usuário (17/06/2026): o mesmo MB6 usa acessórios diferentes
+-- dependendo do produto envasado. Estas linhas SOBRESCREVEM o default genérico
+-- acima quando o produto da oportunidade for FCOJ ou NFC especificamente.
+-- Requer que 'FCOJ' e 'NFC' existam em product_catalog antes deste INSERT rodar.
+
+-- MB6 + FCOJ: usa Poly Liner (em vez do Aseptic Bag do default genérico)
+INSERT INTO packaging_accessories (packaging_type, goodpack_sku_id, product_id, accessory_type_id, region, confidence_level, source_type, source_detail, collected_at)
+SELECT 'goodpack', sku.id, prod.id, acc.id, 'GLOBAL', 'validation_required', 'interno',
+       'Especialização por produto confirmada pelo usuário (17/06/2026) — FCOJ usa Poly Liner', '2026-06-17'
+FROM goodpack_skus sku, product_catalog prod, accessory_types acc
+WHERE sku.sku_code = 'MB6' AND prod.product_name = 'FCOJ' AND acc.accessory_name = 'Poly Liner';
+
+-- MB6 + NFC: usa Aseptic Bag (igual ao default genérico, mas explícito para este produto)
+INSERT INTO packaging_accessories (packaging_type, goodpack_sku_id, product_id, accessory_type_id, region, confidence_level, source_type, source_detail, collected_at)
+SELECT 'goodpack', sku.id, prod.id, acc.id, 'GLOBAL', 'validation_required', 'interno',
+       'Especialização por produto confirmada pelo usuário (17/06/2026) — NFC usa Aseptic Bag', '2026-06-17'
+FROM goodpack_skus sku, product_catalog prod, accessory_types acc
+WHERE sku.sku_code = 'MB6' AND prod.product_name = 'NFC' AND acc.accessory_name = 'Aseptic Bag';
 
 COMMENT ON TABLE packaging_accessories IS
     'Nota de implantação: os INSERTs acima assumem que goodpack_skus já contém MB4/MB5/MB6
