@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     GoodpackSKU, CompetitorUnit, CompetitorPricing,
     PackagingAccessory, AccessoryType, Product, ProductType,
+    TransportType, HandlingParameterType, HandlingBenchmark,
 )
 
 TOOLS = [
@@ -70,6 +71,44 @@ TOOLS = [
                 "region": {"type": "string", "description": "Região da oportunidade, se conhecida (ex: 'LATAM')"},
             },
             "required": ["name"],
+        },
+    },
+    {
+        "name": "get_handling_benchmarks",
+        "description": (
+            "Retorna os benchmarks default (fallback) de todos os parâmetros operacionais de "
+            "Handling — custo de mão de obra por hora, manpower e tempo para cada etapa "
+            "(armazenagem, montagem/desmontagem, empilhamento, carga/descarga) — separados por "
+            "papel (packer ou enduser). Use esta ferramenta SEMPRE antes de calcular custo de "
+            "Handling Packer ou Handling Enduser, para saber quais etapas existem e qual o valor "
+            "default de cada uma quando o vendedor não informar um valor real do cliente."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "enum": ["packer", "enduser", "both"],
+                    "description": "Filtra por papel; 'both' retorna todos os parâmetros de ambos",
+                },
+                "region": {"type": "string", "description": "Região da oportunidade, se conhecida — usa GLOBAL como fallback se não houver benchmark regional"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_transport_specs",
+        "description": (
+            "Retorna os limites de peso bruto (gross weight) de um tipo de transporte (ex: '20ft "
+            "Dry', '40ft Reefer'). Use antes de calcular Transports Needed para validar se a carga "
+            "por unidade de embalagem respeita o limite de peso do transporte escolhido."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "transport_name": {"type": "string", "description": "Nome do tipo de transporte, ex: '40ft Reefer'"},
+            },
+            "required": ["transport_name"],
         },
     },
 ]
@@ -159,5 +198,55 @@ async def execute_tool(db: AsyncSession, tool_name: str, tool_input: dict) -> di
             }
             for p in pricing
         ]}
+
+    elif tool_name == "get_handling_benchmarks":
+        role = tool_input.get("role", "both")
+        region = tool_input.get("region")
+
+        query = select(HandlingParameterType).where(HandlingParameterType.active == True)
+        if role != "both":
+            query = query.where(HandlingParameterType.role == role)
+        params = (await db.execute(query)).scalars().all()
+
+        results = []
+        for p in params:
+            # Tenta benchmark regional primeiro, cai para GLOBAL se não existir
+            value = None
+            confidence = None
+            for candidate_region in filter(None, [region, "GLOBAL"]):
+                bq = select(HandlingBenchmark).where(
+                    HandlingBenchmark.param_key == p.param_key,
+                    HandlingBenchmark.region_code == candidate_region,
+                    HandlingBenchmark.competitor_unit_id.is_(None),
+                    HandlingBenchmark.is_current == True,
+                )
+                benchmark = (await db.execute(bq)).scalar_one_or_none()
+                if benchmark:
+                    value = float(benchmark.value)
+                    confidence = benchmark.confidence_level
+                    break
+            results.append({
+                "param_key": p.param_key,
+                "label": p.param_label,
+                "role": p.role,
+                "unit": p.unit,
+                "default_value": value,
+                "confidence_level": confidence,
+            })
+        return {
+            "parameters": results,
+            "note": "default_value é o benchmark interno (fallback). Se o vendedor informar o valor real do cliente, use o valor real e marque como 'verified'.",
+        }
+
+    elif tool_name == "get_transport_specs":
+        result = await db.execute(select(TransportType).where(TransportType.transport_name == tool_input["transport_name"]))
+        t = result.scalar_one_or_none()
+        if not t:
+            return {"error": f"Tipo de transporte '{tool_input['transport_name']}' não encontrado na base."}
+        return {
+            "transport_name": t.transport_name,
+            "standard_gross_weight_limit_kg": float(t.standard_gross_weight_limit_kg) if t.standard_gross_weight_limit_kg else None,
+            "gross_weight_limit_kg": float(t.gross_weight_limit_kg) if t.gross_weight_limit_kg else None,
+        }
 
     return {"error": f"Tool desconhecida: {tool_name}"}

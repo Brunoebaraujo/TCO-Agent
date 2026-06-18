@@ -239,6 +239,27 @@ class HandlingBenchmark(Base):
     )
 
 
+class TransportType(Base):
+    """
+    Catálogo de tipos de transporte (20ft Dry, 40ft Reefer, etc.) com seus
+    limites de peso bruto — constantes do meio de transporte, não da
+    embalagem nem da oportunidade específica.
+    """
+    __tablename__ = "transport_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    transport_name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+
+    # Limite padrão de peso bruto do equipamento (ex: container 40ft reefer)
+    standard_gross_weight_limit_kg: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+    # Limite prático/regulatório de peso bruto, normalmente menor que o
+    # padrão por restrição de rodagem/porto (ex: limite rodoviário local)
+    gross_weight_limit_kg: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class ProductCategory(Base):
     """Nível 1 da hierarquia de produtos. Ex: Citrus, Dairy, Petrochemicals."""
     __tablename__ = "product_categories"

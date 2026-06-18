@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     GoodpackSKU, CompetitorUnit, ProductCategory, Product, ProductType,
-    AccessoryType, PackagingAccessory, Region,
+    AccessoryType, PackagingAccessory, Region, TransportType,
+    HandlingParameterType, HandlingBenchmark,
 )
 
 GOODPACK_SKUS = [
@@ -116,12 +117,144 @@ PACKAGING_ACCESSORY_RULES = [
 ]
 
 
+TRANSPORT_TYPES = [
+    dict(transport_name="20ft Dry", standard_gross_weight_limit_kg=24000, gross_weight_limit_kg=21770),
+    dict(transport_name="40ft Dry", standard_gross_weight_limit_kg=30480, gross_weight_limit_kg=26000),
+    dict(transport_name="40ft Reefer", standard_gross_weight_limit_kg=29260, gross_weight_limit_kg=26000),
+    dict(transport_name="40ft HC Dry", standard_gross_weight_limit_kg=30480, gross_weight_limit_kg=26000),
+]
+
+# Etapas fixas de Handling, confirmadas pelo usuário (17/06/2026) como
+# universais para qualquer embalagem/produto — não variam por SKU.
+# role: 'packer' | 'enduser'. applies_to: 'both' (mesmo parâmetro vale para
+# Goodpack e concorrente, mas com valores possivelmente diferentes — o
+# benchmark é que diferencia, não o parâmetro em si).
+HANDLING_PARAMETERS = [
+    # --- Packer ---
+    dict(param_key="packer_storage_cost_per_month_stack", param_label="Storage cost per month / stack",
+         unit="USD", value_type="cost", role="packer", applies_to="both"),
+    dict(param_key="packer_storage_time_months", param_label="Storage time",
+         unit="months", value_type="duration", role="packer", applies_to="both"),
+    dict(param_key="packer_labor_cost_per_hour", param_label="Labor cost per hour",
+         unit="USD", value_type="cost", role="packer", applies_to="both"),
+    dict(param_key="packer_assembly_manpower", param_label="Assembly manpower",
+         unit="employees", value_type="count", role="packer", applies_to="both"),
+    dict(param_key="packer_assembly_units_per_hour", param_label="Fill & assemble qty of units per hour",
+         unit="units/hour", value_type="rate", role="packer", applies_to="both"),
+    dict(param_key="packer_stacking_manpower", param_label="Stacking manpower",
+         unit="employees", value_type="count", role="packer", applies_to="both"),
+    dict(param_key="packer_stacking_time_minutes", param_label="Stacking time",
+         unit="minutes", value_type="duration", role="packer", applies_to="both"),
+    dict(param_key="packer_loading_manpower", param_label="Loading manpower",
+         unit="employees", value_type="count", role="packer", applies_to="both"),
+    dict(param_key="packer_loading_time_minutes", param_label="Loading a truck — time",
+         unit="minutes", value_type="duration", role="packer", applies_to="both"),
+    # --- Enduser ---
+    dict(param_key="enduser_storage_cost_per_month_stack", param_label="Storage cost per month / stack",
+         unit="USD", value_type="cost", role="enduser", applies_to="both"),
+    dict(param_key="enduser_storage_time_months", param_label="Storage time",
+         unit="months", value_type="duration", role="enduser", applies_to="both"),
+    dict(param_key="enduser_labor_cost_per_hour", param_label="Labor cost per hour",
+         unit="USD", value_type="cost", role="enduser", applies_to="both"),
+    dict(param_key="enduser_disassembly_manpower", param_label="Disassembly manpower",
+         unit="employees", value_type="count", role="enduser", applies_to="both"),
+    dict(param_key="enduser_disassembly_units_per_hour", param_label="Empty & disassemble qty of units per hour",
+         unit="units/hour", value_type="rate", role="enduser", applies_to="both"),
+    dict(param_key="enduser_remove_trash_minutes", param_label="Remove trash — time",
+         unit="minutes", value_type="duration", role="enduser", applies_to="both"),
+    dict(param_key="enduser_stacking_full_manpower", param_label="Stacking full units manpower",
+         unit="employees", value_type="count", role="enduser", applies_to="both"),
+    dict(param_key="enduser_stacking_full_minutes", param_label="Stacking full units — time",
+         unit="minutes", value_type="duration", role="enduser", applies_to="both"),
+    dict(param_key="enduser_stacking_empty_manpower", param_label="Stacking empty units manpower",
+         unit="employees", value_type="count", role="enduser", applies_to="both"),
+    dict(param_key="enduser_stacking_empty_minutes", param_label="Stacking empty units — time",
+         unit="minutes", value_type="duration", role="enduser", applies_to="both"),
+    dict(param_key="enduser_unloading_manpower", param_label="Unloading manpower",
+         unit="employees", value_type="count", role="enduser", applies_to="both"),
+    dict(param_key="enduser_unloading_minutes", param_label="Unloading a truck — time",
+         unit="minutes", value_type="duration", role="enduser", applies_to="both"),
+]
+
+# Benchmarks default (fallback) — valores da coluna "Estimation" da planilha
+# de referência do usuário, aplicados globalmente (region_code GLOBAL) até
+# que existam benchmarks regionais mais específicos. confidence_level
+# "validation_required" porque são estimativas internas, não confirmadas
+# pelo cliente — mesma lógica usada em PackagingAccessory.
+HANDLING_BENCHMARKS_GLOBAL = {
+    "packer_storage_cost_per_month_stack": 10.00,
+    "packer_storage_time_months": 1,
+    "packer_labor_cost_per_hour": 11.00,
+    "packer_assembly_manpower": 1,
+    "packer_assembly_units_per_hour": 10,
+    "packer_stacking_manpower": 1,
+    "packer_stacking_time_minutes": 20,
+    "packer_loading_manpower": 1,
+    "packer_loading_time_minutes": 30,
+    "enduser_storage_cost_per_month_stack": 10.00,
+    "enduser_storage_time_months": 2,
+    "enduser_labor_cost_per_hour": 11.00,
+    "enduser_disassembly_manpower": 1,
+    "enduser_disassembly_units_per_hour": 4,
+    "enduser_remove_trash_minutes": 2,
+    "enduser_stacking_full_manpower": 1,
+    "enduser_stacking_full_minutes": 20,
+    "enduser_stacking_empty_manpower": 1,
+    "enduser_stacking_empty_minutes": 10,
+    "enduser_unloading_manpower": 1,
+    "enduser_unloading_minutes": 30,
+}
+
+
 async def seed_initial_data(db: AsyncSession) -> None:
     # Regions
     existing_regions = (await db.execute(select(Region.region_code))).scalars().all()
     for code, name in REGIONS:
         if code not in existing_regions:
             db.add(Region(region_code=code, region_name=name))
+    await db.flush()
+
+    # Transport types
+    existing_transport = (await db.execute(select(TransportType.transport_name))).scalars().all()
+    for t in TRANSPORT_TYPES:
+        if t["transport_name"] not in existing_transport:
+            db.add(TransportType(**t))
+    await db.flush()
+
+    # Handling parameter types
+    existing_params = (await db.execute(select(HandlingParameterType.param_key))).scalars().all()
+    for p in HANDLING_PARAMETERS:
+        if p["param_key"] not in existing_params:
+            db.add(HandlingParameterType(**p))
+    await db.flush()
+
+    # Handling benchmarks — default global (fallback), um por param_key.
+    # Upsert por (param_key, applies_to='both', region_code='GLOBAL',
+    # competitor_unit_id=None) para permitir corrigir os valores default
+    # em sessões futuras sem duplicar.
+    existing_benchmarks = {
+        b.param_key: b for b in (
+            await db.execute(
+                select(HandlingBenchmark)
+                .where(HandlingBenchmark.region_code == "GLOBAL")
+                .where(HandlingBenchmark.competitor_unit_id.is_(None))
+            )
+        ).scalars().all()
+    }
+    for param_key, value in HANDLING_BENCHMARKS_GLOBAL.items():
+        if param_key in existing_benchmarks:
+            existing_benchmarks[param_key].value = value
+        else:
+            db.add(HandlingBenchmark(
+                param_key=param_key,
+                applies_to="both",
+                region_code="GLOBAL",
+                value=value,
+                confidence_level="validation_required",
+                source_type="interno",
+                source_detail="Benchmark inicial — referência de planilha interna (17/06/2026)",
+                collected_at=date.today(),
+            ))
     await db.flush()
 
     # Goodpack SKUs — upsert: atualiza specs se a SKU já existe (mantendo o
