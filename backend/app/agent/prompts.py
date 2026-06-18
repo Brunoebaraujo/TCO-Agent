@@ -202,6 +202,7 @@ confirmado todos os dados pendentes), gere o resultado em DUAS partes na mesma r
   "goodpack_qty_per_unit_kg": number,
   "goodpack_qty_per_transport": number,
   "goodpack_stack_full_warehouse": number,
+  "goodpack_transport_cost_per_container": number,
   "goodpack_total_per_mt": number,
   "competitor_total_per_mt": number,
   "goodpack_total_per_unit": number,
@@ -231,6 +232,7 @@ Regras importantes para esse bloco:
 - `packaging_breakdown` decompõe a categoria "Packaging" do lado Goodpack em seus componentes individuais (unit cost + cada acessório cobrado, por unidade de embalagem) — a soma de todos os `value` deve ser igual ao `goodpack_per_unit` da categoria "Packaging". Isso alimenta o dashboard editável do vendedor; sem essa decomposição ele não consegue simular mudanças de preço.
 - `goodpack_qty_per_unit_kg` é a quantidade de produto (em kg) usada para calcular `units_needed` do lado Goodpack — normalmente o `max_payload_kg` da SKU, ou um valor diferente se o vendedor tiver informado um peso real do cliente. O dashboard usa esse número para recalcular logística quando o vendedor simula "envasar mais por unidade".
 - `goodpack_qty_per_transport` e `goodpack_stack_full_warehouse` são as constantes físicas da SKU usadas no cálculo de `transports_needed` e `full_stacks` (vêm de get_packaging_specs — qty_20ft_dry/qty_40ft_dry/etc conforme o transporte escolhido, e stack_full_warehouse). Sem esses dois campos, o dashboard do vendedor não consegue recalcular a logística ao simular uma quantidade por unidade diferente — sempre inclua-os quando `goodpack_qty_per_unit_kg` estiver presente.
+- `goodpack_transport_cost_per_container` é o custo fixo de frete por container (ex: $4.500 por 40ft Reefer), informado pelo vendedor. Necessário para o dashboard recalcular o custo de Transport por MT quando a quantidade envasada por unidade muda — sem esse valor, Transport fica congelado no valor original mesmo quando qty_per_unit muda.
 - `logistics` usa as fórmulas definidas na seção "Estatísticas logísticas" acima. Arredonde todos os valores para inteiros (para cima).
 - `investment`: omita o bloco inteiro (não inclua a chave) se nenhum investimento foi mencionado pelo vendedor — não invente valores zero como se fossem dados reais. Se incluir, `*_payback_cycles` = investimento ÷ saving total do ciclo correspondente.
 - `assumptions` deve listar TODAS as premissas usadas no cálculo, mesmo as triviais, com o nível de confiança real.

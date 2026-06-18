@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, ChevronDown, Loader2, Truck, Package, Layers, Boxes, TrendingUp, RotateCcw } from 'lucide-react'
 import ConfidenceBadge from '../ui/ConfidenceBadge'
-import { recalcPackaging, recalcLogistics, recalcTotals } from './dashboardCalc'
+import { recalcPackagingByPrice, recalcCategoriesByQty, recalcLogistics, recalcTotals } from './dashboardCalc'
 
 const STACK_COLORS = ['#378ADD', '#888780', '#85B7EB', '#BA7517', '#1D9E75']
 
@@ -48,34 +48,49 @@ export default function TCODashboard({ result, sessionId }) {
   const hasEditableQty = qtyPerUnit != null
 
   const recalculated = useMemo(() => {
+    const origQtyKg = result?.goodpack_qty_per_unit_kg ?? null
+    const effectiveQty = hasEditableQty ? qtyPerUnit : origQtyKg
+    const qtyChanged = hasEditableQty && effectiveQty !== origQtyKg
+    const qtyPerTransport = result?.goodpack_qty_per_transport ?? null
+    const stackFullWarehouse = result?.goodpack_stack_full_warehouse ?? null
+    const transportCostPerContainer = result?.goodpack_transport_cost_per_container ?? null
+
+    // Recalcula Packaging pelo delta de preço do breakdown
     const pkg = hasEditableBreakdown
-      ? recalcPackaging(breakdown, originalPackagingPerUnit, originalPackagingPerMt)
+      ? recalcPackagingByPrice(breakdown, originalPackagingPerUnit, originalPackagingPerMt)
       : { perUnit: originalPackagingPerUnit, perMt: originalPackagingPerMt }
 
-    const totals = recalcTotals(result ?? {}, pkg.perMt)
+    // Se qty mudou, todas as categorias recalculam pela nova quantidade
+    // Packaging também precisa ser ajustado proporcionalmente à qty
+    const pkgPerMtFinal = qtyChanged && origQtyKg
+      ? pkg.perMt * (origQtyKg / effectiveQty)
+      : pkg.perMt
 
+    const recalcedByQty = qtyChanged && effectiveQty
+      ? recalcCategoriesByQty(categories, effectiveQty, origQtyKg, qtyPerTransport, transportCostPerContainer)
+      : null
+
+    const totals = recalcTotals(result ?? {}, pkgPerMtFinal, recalcedByQty)
+
+    // Logística
     let logistics = result?.logistics
-    if (hasEditableQty && result?.logistics?.goodpack) {
-      const qtyPerTransport = result?.goodpack_qty_per_transport ?? null
-      const stackFullWarehouse = result?.goodpack_stack_full_warehouse ?? null
-      if (qtyPerTransport && stackFullWarehouse) {
-        const newLogistics = recalcLogistics(
-          result.simulated_metric_tonnes, qtyPerUnit, qtyPerTransport, stackFullWarehouse
-        )
-        logistics = {
-          ...result.logistics,
-          goodpack: {
-            units_needed: newLogistics.unitsNeeded,
-            transports_needed: newLogistics.transportsNeeded,
-            pallet_places: newLogistics.palletPlaces,
-            full_stacks: newLogistics.fullStacks,
-          },
-        }
+    if (effectiveQty && qtyPerTransport && stackFullWarehouse) {
+      const newLogistics = recalcLogistics(
+        result.simulated_metric_tonnes, effectiveQty, qtyPerTransport, stackFullWarehouse
+      )
+      logistics = {
+        ...result.logistics,
+        goodpack: {
+          units_needed: newLogistics.unitsNeeded,
+          transports_needed: newLogistics.transportsNeeded,
+          pallet_places: newLogistics.palletPlaces,
+          full_stacks: newLogistics.fullStacks,
+        },
       }
     }
 
     return { packaging: pkg, totals, logistics }
-  }, [breakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty, originalPackagingPerUnit, originalPackagingPerMt])
+  }, [breakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty, originalPackagingPerUnit, originalPackagingPerMt, categories])
 
   async function handleExport(includeAssumptions) {
     if (!sessionId) return
@@ -123,9 +138,8 @@ export default function TCODashboard({ result, sessionId }) {
       chartInstanceRef.current.destroy()
     }
 
-    const goodpackData = categories.map(c =>
-      c.label === 'Packaging' ? recalculated.packaging.perMt : c.goodpack
-    )
+    const categoriesForChart = recalculated.totals.categoriesRecalced ?? categories
+    const goodpackData = categoriesForChart.map(c => c.goodpack)
     const competitorData = categories.map(c => c.competitor)
 
     const goodpackTotal = recalculated.totals.goodpackTotalPerMt
