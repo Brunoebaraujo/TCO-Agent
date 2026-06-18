@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Download, ChevronDown, Loader2, Truck, Package, Layers, Boxes } from 'lucide-react'
+import { Download, ChevronDown, Loader2, Truck, Package, Layers, Boxes, TrendingUp } from 'lucide-react'
 import ConfidenceBadge from '../ui/ConfidenceBadge'
 
 const STACK_COLORS = ['#378ADD', '#888780', '#85B7EB', '#BA7517', '#1D9E75']
@@ -134,12 +134,14 @@ export default function TCOSummaryTable({ result, sessionId }) {
     competitor_name,
     transport_type,
     simulated_metric_tonnes,
+    product_density,
     lease_days,
     currency = 'USD',
     total_saving,
     saving_percentage,
     goodpack_total_per_unit,
     competitor_total_per_unit,
+    investment,
     assumptions = [],
   } = result
 
@@ -160,6 +162,7 @@ export default function TCOSummaryTable({ result, sessionId }) {
           {product_name} · {simulated_metric_tonnes} MT · {goodpack_sku} vs {competitor_name}
           {transport_type && ` · ${transport_type}`}
           {lease_days != null && ` · ${lease_days} lease days`}
+          {product_density != null && ` · density ${product_density}`}
         </p>
       </div>
 
@@ -266,6 +269,38 @@ export default function TCOSummaryTable({ result, sessionId }) {
           <p className="text-lg font-medium text-slate-800">{assumptions.length}</p>
         </div>
       </div>
+
+      {/* Investimento e payback — só aparece se a oportunidade envolver adaptação de linha */}
+      {investment && (investment.goodpack_investment_required != null || investment.competitor_investment_required != null) && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <p className="text-xs text-slate-400 mb-2 flex items-center gap-1.5">
+            <TrendingUp size={13} />
+            Investimento e payback
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-500 font-medium mb-1">{goodpack_sku}</p>
+              <p className="text-xs text-slate-400">Investimento</p>
+              <p className="text-sm font-medium text-slate-800">{formatCurrency(investment.goodpack_investment_required, currency)}</p>
+              {investment.goodpack_payback_cycles != null && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Payback: <span className="font-medium text-slate-700">{investment.goodpack_payback_cycles.toFixed(2)} ciclos</span>
+                </p>
+              )}
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-500 font-medium mb-1">{competitor_name}</p>
+              <p className="text-xs text-slate-400">Investimento</p>
+              <p className="text-sm font-medium text-slate-800">{formatCurrency(investment.competitor_investment_required, currency)}</p>
+              {investment.competitor_payback_cycles != null && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Payback: <span className="font-medium text-slate-700">{investment.competitor_payback_cycles.toFixed(2)} ciclos</span>
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Premissas usadas */}
       {assumptions.length > 0 && (
