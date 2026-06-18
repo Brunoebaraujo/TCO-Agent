@@ -9,6 +9,7 @@ from app.db.models import (
     GoodpackSKU, CompetitorUnit, CompetitorPricing,
     PackagingAccessory, AccessoryType, Product, ProductType,
     TransportType, HandlingParameterType, HandlingBenchmark,
+    CustomerCompetitorPrice,
 )
 
 TOOLS = [
@@ -109,6 +110,35 @@ TOOLS = [
                 "transport_name": {"type": "string", "description": "Nome do tipo de transporte, ex: '40ft Reefer'"},
             },
             "required": ["transport_name"],
+        },
+    },
+    {
+        "name": "get_competitor_price_intelligence",
+        "description": (
+            "Consulta o histórico de preços reais de embalagens concorrentes registrados em TCOs "
+            "anteriores — preços confirmados por clientes reais, não benchmarks de mercado. "
+            "Retorna estatísticas (média, mínimo, máximo) e a lista de clientes com seus preços, "
+            "permitindo responder perguntas como 'quem paga mais caro pelo Octabin?' ou 'qual o "
+            "preço médio do Drum 200L em oportunidades passadas?'. Use quando o vendedor perguntar "
+            "sobre preços históricos ou precisar de referência para negociar."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "competitor_name": {
+                    "type": "string",
+                    "description": "Nome da embalagem concorrente (ex: 'Octabin', 'Drum 200L'). Omitir para ver todos.",
+                },
+                "goodpack_sku": {
+                    "type": "string",
+                    "description": "Filtrar por SKU Goodpack comparada (ex: 'MB6'). Omitir para ver todos.",
+                },
+                "product_name": {
+                    "type": "string",
+                    "description": "Filtrar por produto (ex: 'Orange'). Omitir para ver todos.",
+                },
+            },
+            "required": [],
         },
     },
 ]
@@ -247,6 +277,56 @@ async def execute_tool(db: AsyncSession, tool_name: str, tool_input: dict) -> di
             "transport_name": t.transport_name,
             "standard_gross_weight_limit_kg": float(t.standard_gross_weight_limit_kg) if t.standard_gross_weight_limit_kg else None,
             "gross_weight_limit_kg": float(t.gross_weight_limit_kg) if t.gross_weight_limit_kg else None,
+        }
+
+    elif tool_name == "get_competitor_price_intelligence":
+        from sqlalchemy import func as sqlfunc
+        query = select(CustomerCompetitorPrice).where(CustomerCompetitorPrice.unit_price > 0)
+
+        if tool_input.get("competitor_name"):
+            query = query.where(
+                CustomerCompetitorPrice.competitor_name_raw.ilike(f"%{tool_input['competitor_name']}%")
+            )
+        if tool_input.get("goodpack_sku"):
+            query = query.where(CustomerCompetitorPrice.goodpack_sku == tool_input["goodpack_sku"])
+        if tool_input.get("product_name"):
+            query = query.where(
+                CustomerCompetitorPrice.product_name.ilike(f"%{tool_input['product_name']}%")
+            )
+
+        records = (await db.execute(query.order_by(CustomerCompetitorPrice.unit_price.desc()))).scalars().all()
+
+        if not records:
+            return {"message": "Nenhum registro encontrado para os filtros informados. Os preços são registrados automaticamente ao finalizar um TCO."}
+
+        prices = [float(r.unit_price) for r in records]
+        avg_price = sum(prices) / len(prices)
+
+        entries = [
+            {
+                "customer_name": r.customer_name,
+                "competitor_name": r.competitor_name_raw,
+                "goodpack_sku": r.goodpack_sku,
+                "product_name": r.product_name,
+                "unit_price": float(r.unit_price),
+                "currency": r.currency,
+                "simulated_mt": float(r.simulated_metric_tonnes) if r.simulated_metric_tonnes else None,
+                "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+            }
+            for r in records
+        ]
+
+        return {
+            "total_records": len(records),
+            "statistics": {
+                "average_price": round(avg_price, 2),
+                "min_price": min(prices),
+                "max_price": max(prices),
+                "currency": records[0].currency if records else "USD",
+            },
+            "highest_paying_customer": entries[0] if entries else None,
+            "lowest_paying_customer": entries[-1] if entries else None,
+            "all_records": entries,
         }
 
     return {"error": f"Tool desconhecida: {tool_name}"}

@@ -374,3 +374,67 @@ class TCOAssumptionDetail(Base):
     __table_args__ = (
         Index("idx_tco_assumptions_analysis", "tco_analysis_id", "confidence_level"),
     )
+
+
+class CustomerCompetitorPrice(Base):
+    """
+    Preço real de uma embalagem concorrente confirmado por um cliente
+    específico, extraído automaticamente do TCO_RESULT ao final de cada
+    análise.
+
+    Diferente de CompetitorPricing (que são benchmarks de mercado editáveis
+    no KB por região), esta tabela registra o que cada cliente *de fato*
+    pagou ou declarou pagar — a fonte primária para análise de inteligência
+    competitiva por cliente ("quem paga mais caro pelo Octabin?").
+    """
+    __tablename__ = "customer_competitor_prices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # Referência à sessão de chat que originou este registro — permite
+    # rastrear de qual análise o preço veio e reabrir o contexto completo.
+    chat_session_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="SET NULL")
+    )
+
+    # Nome do cliente exatamente como apareceu no TCO_RESULT — não FK
+    # para uma tabela de clientes (não temos essa tabela ainda), apenas
+    # texto livre para facilitar agrupamento e busca.
+    customer_name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # FK para a embalagem concorrente, resolvida pelo nome no momento da
+    # extração — NULL se o nome não bater com nenhuma unidade cadastrada.
+    competitor_unit_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("competitor_units.id", ondelete="SET NULL")
+    )
+    # Guardamos também o nome bruto (como veio do agente) para não perder
+    # o dado quando a embalagem não estiver cadastrada ainda.
+    competitor_name_raw: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # SKU Goodpack que foi comparada nessa análise — contexto útil para
+    # saber em qual cenário competitivo o preço foi registrado.
+    goodpack_sku: Mapped[Optional[str]] = mapped_column(String(20))
+
+    # Produto e tipo, para filtrar por mercado (ex: só Citrus).
+    product_name: Mapped[Optional[str]] = mapped_column(String(200))
+
+    # Preço da embalagem concorrente conforme declarado pelo vendedor
+    # (competitor_per_unit da categoria Packaging, que inclui unit cost +
+    # acessórios do concorrente, por unidade de embalagem).
+    unit_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+
+    # Volume e lease days do TCO — contexto adicional que pode influenciar
+    # o preço negociado (ex: desconto por volume).
+    simulated_metric_tonnes: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+    lease_days: Mapped[Optional[int]] = mapped_column(Integer)
+
+    recorded_at: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    competitor_unit: Mapped[Optional["CompetitorUnit"]] = relationship()
+
+    __table_args__ = (
+        Index("idx_ccp_competitor_unit", "competitor_unit_id", "recorded_at"),
+        Index("idx_ccp_customer", "customer_name", "recorded_at"),
+    )

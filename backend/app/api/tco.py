@@ -3,14 +3,14 @@ Router: TCO — endpoints para gerar e consultar análises TCO
 """
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
-from app.db.models import ChatSession
+from app.db.models import ChatSession, CompetitorUnit, CustomerCompetitorPrice
 from app.integrations.pptx_export import generate_tco_pptx
 
 router = APIRouter()
@@ -75,6 +75,51 @@ async def get_session(session_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
+async def _record_competitor_price(db: AsyncSession, session_id: int, tco: dict) -> None:
+    """
+    Extrai o preço do concorrente do TCO_RESULT e grava em
+    CustomerCompetitorPrice para alimentar a inteligência competitiva.
+
+    Chamado apenas quando um TCO_RESULT novo é detectado no save_session.
+    Silenciosamente ignora falhas — nunca deve bloquear o save da sessão.
+    """
+    try:
+        customer = tco.get("customer_name", "").strip()
+        competitor_name = tco.get("competitor_name", "").strip()
+        if not customer or not competitor_name:
+            return
+
+        # Custo por unidade do concorrente vem da categoria Packaging
+        categories = tco.get("categories", [])
+        pkg = next((c for c in categories if c.get("label") == "Packaging"), None)
+        competitor_per_unit = pkg.get("competitor_per_unit") if pkg else None
+        if competitor_per_unit is None:
+            return
+
+        # Tenta resolver a FK do concorrente pelo nome
+        res = await db.execute(
+            select(CompetitorUnit).where(CompetitorUnit.unit_name == competitor_name)
+        )
+        unit = res.scalar_one_or_none()
+
+        record = CustomerCompetitorPrice(
+            chat_session_id=session_id,
+            customer_name=customer,
+            competitor_unit_id=unit.id if unit else None,
+            competitor_name_raw=competitor_name,
+            goodpack_sku=tco.get("goodpack_sku"),
+            product_name=tco.get("product_name"),
+            unit_price=float(competitor_per_unit),
+            currency=tco.get("currency", "USD"),
+            simulated_metric_tonnes=tco.get("simulated_metric_tonnes"),
+            lease_days=tco.get("lease_days"),
+            recorded_at=date.today(),
+        )
+        db.add(record)
+    except Exception:
+        pass  # Nunca bloqueia o save da sessão
+
+
 @router.post("/save")
 async def save_session(request: SessionSaveRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -90,10 +135,23 @@ async def save_session(request: SessionSaveRequest, db: AsyncSession = Depends(g
         session = await db.get(ChatSession, request.session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Sessão não encontrada")
+
+        # Detecta se chegou um TCO_RESULT novo neste save (não estava antes)
+        old_result = json.loads(session.last_tco_result_json) if session.last_tco_result_json else None
+        is_new_result = latest_result and (
+            not old_result
+            or old_result.get("customer_name") != latest_result.get("customer_name")
+            or old_result.get("competitor_name") != latest_result.get("competitor_name")
+        )
+
         session.messages_json = json.dumps(messages_data, ensure_ascii=False)
         session.title = title
         session.last_tco_result_json = json.dumps(latest_result, ensure_ascii=False) if latest_result else None
         session.updated_at = datetime.utcnow()
+        await db.flush()
+
+        if is_new_result:
+            await _record_competitor_price(db, session.id, latest_result)
     else:
         session = ChatSession(
             title=title,
@@ -101,8 +159,11 @@ async def save_session(request: SessionSaveRequest, db: AsyncSession = Depends(g
             last_tco_result_json=json.dumps(latest_result, ensure_ascii=False) if latest_result else None,
         )
         db.add(session)
+        await db.flush()
 
-    await db.flush()
+        if latest_result:
+            await _record_competitor_price(db, session.id, latest_result)
+
     return {"session_id": session.id}
 
 
