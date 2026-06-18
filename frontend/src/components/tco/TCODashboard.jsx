@@ -1,0 +1,443 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Download, ChevronDown, Loader2, Truck, Package, Layers, Boxes, TrendingUp, RotateCcw } from 'lucide-react'
+import ConfidenceBadge from '../ui/ConfidenceBadge'
+import { recalcPackaging, recalcLogistics, recalcTotals } from './dashboardCalc'
+
+const STACK_COLORS = ['#378ADD', '#888780', '#85B7EB', '#BA7517', '#1D9E75']
+
+function formatCurrency(value, currency = 'USD') {
+  if (value == null || Number.isNaN(value)) return '—'
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+  }).format(value)
+}
+
+function formatNumber(value) {
+  if (value == null || Number.isNaN(value)) return '—'
+  return new Intl.NumberFormat('en-US').format(Math.round(value))
+}
+
+export default function TCODashboard({ result, sessionId }) {
+  const chartRef = useRef(null)
+  const chartInstanceRef = useRef(null)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  const [breakdown, setBreakdown] = useState(() =>
+    (result?.packaging_breakdown ?? []).map(item => ({ ...item }))
+  )
+  const [qtyPerUnit, setQtyPerUnit] = useState(result?.goodpack_qty_per_unit_kg ?? null)
+
+  useEffect(() => {
+    setBreakdown((result?.packaging_breakdown ?? []).map(item => ({ ...item })))
+    setQtyPerUnit(result?.goodpack_qty_per_unit_kg ?? null)
+  }, [result])
+
+  const categories = result?.categories ?? []
+  const competitorName = result?.competitor_name ?? 'Concorrente'
+  const goodpackSku = result?.goodpack_sku ?? 'Goodpack'
+  const currency = result?.currency ?? 'USD'
+
+  const packagingCategory = categories.find(c => c.label === 'Packaging')
+  const originalPackagingPerUnit = packagingCategory?.goodpack_per_unit ?? 0
+  const originalPackagingPerMt = packagingCategory?.goodpack ?? 0
+
+  const hasEditableBreakdown = breakdown.length > 0
+  const hasEditableQty = qtyPerUnit != null
+
+  const recalculated = useMemo(() => {
+    const pkg = hasEditableBreakdown
+      ? recalcPackaging(breakdown, originalPackagingPerUnit, originalPackagingPerMt)
+      : { perUnit: originalPackagingPerUnit, perMt: originalPackagingPerMt }
+
+    const totals = recalcTotals(result ?? {}, pkg.perMt)
+
+    let logistics = result?.logistics
+    if (hasEditableQty && result?.logistics?.goodpack) {
+      const qtyPerTransport = result?.goodpack_qty_per_transport ?? null
+      const stackFullWarehouse = result?.goodpack_stack_full_warehouse ?? null
+      if (qtyPerTransport && stackFullWarehouse) {
+        const newLogistics = recalcLogistics(
+          result.simulated_metric_tonnes, qtyPerUnit, qtyPerTransport, stackFullWarehouse
+        )
+        logistics = {
+          ...result.logistics,
+          goodpack: {
+            units_needed: newLogistics.unitsNeeded,
+            transports_needed: newLogistics.transportsNeeded,
+            pallet_places: newLogistics.palletPlaces,
+            full_stacks: newLogistics.fullStacks,
+          },
+        }
+      }
+    }
+
+    return { packaging: pkg, totals, logistics }
+  }, [breakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty, originalPackagingPerUnit, originalPackagingPerMt])
+
+  async function handleExport(includeAssumptions) {
+    if (!sessionId) return
+    setExportMenuOpen(false)
+    setExporting(true)
+    try {
+      const url = `/api/tco/${sessionId}/export/pptx?include_assumptions=${includeAssumptions}`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('Falha ao exportar')
+      const blob = await res.blob()
+
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const filename = match ? match[1] : 'TCO.pptx'
+
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(downloadUrl)
+    } catch (err) {
+      console.error('Erro ao exportar PPTX:', err)
+      alert('Não foi possível exportar o arquivo. Tente novamente.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  function handleBreakdownChange(index, newValue) {
+    setBreakdown(prev => prev.map((item, i) => i === index ? { ...item, value: newValue } : item))
+  }
+
+  function handleReset() {
+    setBreakdown((result?.packaging_breakdown ?? []).map(item => ({ ...item })))
+    setQtyPerUnit(result?.goodpack_qty_per_unit_kg ?? null)
+  }
+
+  useEffect(() => {
+    if (!result || !chartRef.current || categories.length === 0) return
+
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy()
+    }
+
+    const goodpackData = categories.map(c =>
+      c.label === 'Packaging' ? recalculated.packaging.perMt : c.goodpack
+    )
+    const competitorData = categories.map(c => c.competitor)
+
+    const goodpackTotal = recalculated.totals.goodpackTotalPerMt
+    const competitorTotal = result.competitor_total_per_mt
+    const totals = [goodpackTotal, competitorTotal]
+    const maxTotal = Math.max(...totals.filter(t => t != null))
+
+    const totalLabelPlugin = {
+      id: 'totalLabel',
+      afterDatasetsDraw(chart) {
+        const { ctx, scales: { x, y } } = chart
+        ctx.save()
+        ctx.font = '500 12px sans-serif'
+        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--color-text-primary') || '#1e293b'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'bottom'
+        chart.data.labels.forEach((label, i) => {
+          const total = totals[i]
+          if (total == null) return
+          const xPos = x.getPixelForValue(i)
+          const yPos = y.getPixelForValue(total)
+          ctx.fillText('$' + total.toFixed(2), xPos, yPos - 6)
+        })
+        ctx.restore()
+      },
+    }
+
+    chartInstanceRef.current = new window.Chart(chartRef.current, {
+      type: 'bar',
+      data: {
+        labels: [goodpackSku, competitorName],
+        datasets: categories.map((c, i) => ({
+          label: c.label,
+          data: [goodpackData[i], competitorData[i]],
+          backgroundColor: STACK_COLORS[i % STACK_COLORS.length],
+        })),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: { top: 24 } },
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { stacked: true },
+          y: {
+            stacked: true,
+            suggestedMax: maxTotal ? maxTotal * 1.15 : undefined,
+            ticks: { callback: (v) => '$' + v },
+          },
+        },
+      },
+      plugins: [totalLabelPlugin],
+    })
+
+    return () => {
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.destroy()
+        chartInstanceRef.current = null
+      }
+    }
+  }, [result, recalculated, categories, goodpackSku, competitorName])
+
+  if (!result) return null
+
+  const {
+    customer_name,
+    product_name,
+    transport_type,
+    simulated_metric_tonnes,
+    lease_days,
+    investment,
+    assumptions = [],
+  } = result
+
+  const logistics = recalculated.logistics
+  const statCards = logistics ? [
+    { icon: Truck, label: 'Transports needed', gp: logistics.goodpack?.transports_needed, comp: logistics.competitor?.transports_needed },
+    { icon: Package, label: 'Units needed', gp: logistics.goodpack?.units_needed, comp: logistics.competitor?.units_needed },
+    { icon: Layers, label: 'Pallet places', gp: logistics.goodpack?.pallet_places, comp: logistics.competitor?.pallet_places },
+    { icon: Boxes, label: 'Full stacks', gp: logistics.goodpack?.full_stacks, comp: logistics.competitor?.full_stacks },
+  ] : []
+
+  const isEdited = hasEditableBreakdown && result.packaging_breakdown && (
+    breakdown.some((item, i) => item.value !== result.packaging_breakdown[i]?.value)
+    || qtyPerUnit !== result.goodpack_qty_per_unit_kg
+  )
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 max-w-5xl">
+
+      <div className="mb-4 pb-3 border-b border-slate-100 flex items-start justify-between">
+        <div>
+          <p className="text-sm font-medium text-slate-800">{customer_name}</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {product_name} · {simulated_metric_tonnes} MT · {goodpackSku} vs {competitorName}
+            {transport_type && ` · ${transport_type}`}
+            {lease_days != null && ` · ${lease_days} lease days`}
+          </p>
+        </div>
+        {isEdited && (
+          <button
+            onClick={handleReset}
+            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-md hover:bg-slate-50 transition-colors"
+          >
+            <RotateCcw size={12} />
+            Restaurar valores originais
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-5">
+
+        <div className="flex flex-col gap-3">
+
+          {hasEditableBreakdown && (
+            <div className="bg-slate-50 rounded-lg p-3.5">
+              <p className="text-xs font-medium text-slate-700">Packaging — {goodpackSku}</p>
+              <p className="text-[11px] text-slate-400 mb-2.5">Editável — afeta o gráfico</p>
+              <div className="flex flex-col gap-2.5">
+                {breakdown.map((item, i) => (
+                  <div key={i}>
+                    <label className="text-[11px] text-slate-500 block mb-1">{item.label}</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={item.value}
+                      onChange={(e) => handleBreakdownChange(i, parseFloat(e.target.value) || 0)}
+                      className="w-full text-sm border border-blue-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasEditableQty && (
+            <div className="bg-slate-50 rounded-lg p-3.5">
+              <p className="text-xs font-medium text-slate-700">Quantidade envasada</p>
+              <p className="text-[11px] text-slate-400 mb-2.5">Editável — recalcula logística</p>
+              <label className="text-[11px] text-slate-500 block mb-1">Kg por {goodpackSku}</label>
+              <input
+                type="number"
+                step="10"
+                value={qtyPerUnit}
+                onChange={(e) => setQtyPerUnit(parseFloat(e.target.value) || 0)}
+                className="w-full text-sm border border-blue-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-300"
+              />
+            </div>
+          )}
+
+          <div className="bg-slate-50 rounded-lg p-3.5">
+            <p className="text-xs font-medium text-slate-700 mb-2.5">Demais categorias</p>
+            <div className="flex flex-col gap-1.5 text-[11px]">
+              {categories.filter(c => c.label !== 'Packaging').map((c, i) => (
+                <div key={i} className="flex justify-between">
+                  <span className="text-slate-500">{c.label} ({goodpackSku})</span>
+                  <span className="text-slate-700">{formatCurrency(c.goodpack, currency)}/MT</span>
+                </div>
+              ))}
+              <div className="border-t border-slate-200 my-1" />
+              <div className="flex justify-between">
+                <span className="text-slate-500">{competitorName} — total</span>
+                <span className="text-slate-700">{formatCurrency(result.competitor_total_per_mt, currency)}/MT</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div className="flex flex-col">
+
+          <div className="flex gap-3 text-[11px] text-slate-500 mb-2 flex-wrap justify-center">
+            {categories.map((c, i) => (
+              <span key={i} className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ background: STACK_COLORS[i % STACK_COLORS.length] }} />
+                {c.label}
+              </span>
+            ))}
+          </div>
+          <div style={{ position: 'relative', height: '260px' }} className="mb-4">
+            <canvas
+              ref={chartRef}
+              role="img"
+              aria-label={`Gráfico de barras empilhadas comparando custo total por MT entre ${goodpackSku} e ${competitorName}, por categoria`}
+            />
+          </div>
+
+          {statCards.length > 0 && (
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {statCards.map((s, i) => {
+                const Icon = s.icon
+                return (
+                  <div key={i} className="bg-slate-50 rounded-lg p-3 text-center">
+                    <Icon size={18} className="text-slate-400 mx-auto" />
+                    <p className="text-[11px] text-slate-400 mt-1.5 mb-0.5">{s.label}</p>
+                    <p className="text-sm font-medium text-slate-800">
+                      {formatNumber(s.gp)}
+                      <span className="text-[11px] text-slate-400 font-normal"> vs {formatNumber(s.comp)}</span>
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-400">Saving total</p>
+              <p className="text-lg font-medium text-emerald-600">{formatCurrency(recalculated.totals.totalSaving, currency)}</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-400">Redução</p>
+              <p className="text-lg font-medium text-slate-800">{recalculated.totals.savingPercentage.toFixed(1)}%</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-400">Premissas</p>
+              <p className="text-lg font-medium text-slate-800">{assumptions.length}</p>
+            </div>
+          </div>
+
+          {investment && (investment.goodpack_investment_required != null || investment.competitor_investment_required != null) && (
+            <div className="mb-4">
+              <p className="text-xs text-slate-400 mb-2 flex items-center gap-1.5">
+                <TrendingUp size={13} />
+                Investimento e payback
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-xs text-slate-500 font-medium mb-1">{goodpackSku}</p>
+                  <p className="text-xs text-slate-400">Investimento</p>
+                  <p className="text-sm font-medium text-slate-800">{formatCurrency(investment.goodpack_investment_required, currency)}</p>
+                  {investment.goodpack_payback_cycles != null && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Payback: <span className="font-medium text-slate-700">{investment.goodpack_payback_cycles.toFixed(2)} ciclos</span>
+                    </p>
+                  )}
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-xs text-slate-500 font-medium mb-1">{competitorName}</p>
+                  <p className="text-xs text-slate-400">Investimento</p>
+                  <p className="text-sm font-medium text-slate-800">{formatCurrency(investment.competitor_investment_required, currency)}</p>
+                  {investment.competitor_payback_cycles != null && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Payback: <span className="font-medium text-slate-700">{investment.competitor_payback_cycles.toFixed(2)} ciclos</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {assumptions.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs text-slate-400 mb-2">Premissas usadas neste cálculo</p>
+              <div className="space-y-2">
+                {assumptions.map((a, i) => (
+                  <div key={i} className="bg-slate-50 rounded-lg px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-xs text-slate-700 leading-relaxed flex-1">{a.label}</p>
+                      <div className="flex-shrink-0">
+                        <ConfidenceBadge level={a.confidence_level} />
+                      </div>
+                    </div>
+                    {a.source && (
+                      <p className="text-[11px] text-slate-400 mt-1">Fonte: {a.source}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {sessionId && (
+            <div className="relative">
+              <button
+                onClick={() => setExportMenuOpen(o => !o)}
+                disabled={exporting}
+                className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+              >
+                {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                <span>Exportar PowerPoint</span>
+                <ChevronDown size={14} className="text-slate-400" />
+              </button>
+
+              {exportMenuOpen && (
+                <div className="absolute bottom-full left-0 mb-1 bg-white border border-slate-200 rounded-lg shadow-sm py-1 w-64 z-10">
+                  <button
+                    onClick={() => handleExport(false)}
+                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    Apenas resumo
+                    <span className="block text-xs text-slate-400">Tabela, gráfico e saving total</span>
+                  </button>
+                  <button
+                    onClick={() => handleExport(true)}
+                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    Resumo + premissas
+                    <span className="block text-xs text-slate-400">Inclui slide com fontes e confiança</span>
+                  </button>
+                </div>
+              )}
+              {isEdited && (
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  O PowerPoint exporta os valores originais do agente, não os valores simulados aqui.
+                </p>
+              )}
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  )
+}

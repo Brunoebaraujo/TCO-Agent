@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Send, Loader2 } from 'lucide-react'
-import TCOSummaryTable from '../components/tco/TCOSummaryTable'
+import TCODashboard from '../components/tco/TCODashboard'
 
 const WELCOME_MESSAGE = {
   role: 'assistant',
@@ -152,7 +152,7 @@ export default function ChatPage() {
                   <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                 </div>
               )}
-              {msg.tco_result && <TCOSummaryTable result={msg.tco_result} sessionId={sessionId} />}
+              {msg.tco_result && <TCODashboard result={msg.tco_result} sessionId={sessionId} />}
             </div>
           </div>
         ))}

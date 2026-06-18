@@ -195,6 +195,13 @@ confirmado todos os dados pendentes), gere o resultado em DUAS partes na mesma r
     {"label": "Handling enduser", "goodpack": number, "competitor": number, "goodpack_per_unit": number, "competitor_per_unit": number},
     {"label": "Empty container mgmt", "goodpack": number, "competitor": number, "goodpack_per_unit": number, "competitor_per_unit": number}
   ],
+  "packaging_breakdown": [
+    {"label": "Unit cost", "value": number},
+    {"label": "string — nome do acessório, ex: Aseptic Bag", "value": number}
+  ],
+  "goodpack_qty_per_unit_kg": number,
+  "goodpack_qty_per_transport": number,
+  "goodpack_stack_full_warehouse": number,
   "goodpack_total_per_mt": number,
   "competitor_total_per_mt": number,
   "goodpack_total_per_unit": number,
@@ -221,6 +228,9 @@ Regras importantes para esse bloco:
 - Todos os números são valores numéricos puros (sem símbolo de moeda, sem separador de milhar).
 - `categories` deve ter exatamente as 5 categorias listadas, na mesma ordem.
 - `goodpack`/`competitor` em cada categoria são custo por MT; `goodpack_per_unit`/`competitor_per_unit` são custo por unidade de embalagem (use 0 se não aplicável, nunca omita o campo).
+- `packaging_breakdown` decompõe a categoria "Packaging" do lado Goodpack em seus componentes individuais (unit cost + cada acessório cobrado, por unidade de embalagem) — a soma de todos os `value` deve ser igual ao `goodpack_per_unit` da categoria "Packaging". Isso alimenta o dashboard editável do vendedor; sem essa decomposição ele não consegue simular mudanças de preço.
+- `goodpack_qty_per_unit_kg` é a quantidade de produto (em kg) usada para calcular `units_needed` do lado Goodpack — normalmente o `max_payload_kg` da SKU, ou um valor diferente se o vendedor tiver informado um peso real do cliente. O dashboard usa esse número para recalcular logística quando o vendedor simula "envasar mais por unidade".
+- `goodpack_qty_per_transport` e `goodpack_stack_full_warehouse` são as constantes físicas da SKU usadas no cálculo de `transports_needed` e `full_stacks` (vêm de get_packaging_specs — qty_20ft_dry/qty_40ft_dry/etc conforme o transporte escolhido, e stack_full_warehouse). Sem esses dois campos, o dashboard do vendedor não consegue recalcular a logística ao simular uma quantidade por unidade diferente — sempre inclua-os quando `goodpack_qty_per_unit_kg` estiver presente.
 - `logistics` usa as fórmulas definidas na seção "Estatísticas logísticas" acima. Arredonde todos os valores para inteiros (para cima).
 - `investment`: omita o bloco inteiro (não inclua a chave) se nenhum investimento foi mencionado pelo vendedor — não invente valores zero como se fossem dados reais. Se incluir, `*_payback_cycles` = investimento ÷ saving total do ciclo correspondente.
 - `assumptions` deve listar TODAS as premissas usadas no cálculo, mesmo as triviais, com o nível de confiança real.
