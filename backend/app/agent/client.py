@@ -2,7 +2,7 @@
 Cliente Claude API — encapsula a chamada ao agente TCO, incluindo o ciclo
 de tool use (function calling) para consultar dados reais da base.
 """
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, APIStatusError, APIConnectionError, RateLimitError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.agent.prompts import SYSTEM_PROMPT
@@ -11,6 +11,26 @@ from app.agent.tools import TOOLS, execute_tool
 client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 MAX_TOOL_ROUNDS = 5  # limite de segurança contra loops de tool use
+
+# Mensagens de erro amigáveis por tipo de falha — em português, no tom do agente,
+# para que o vendedor entenda o que aconteceu sem precisar abrir o console.
+_MSG_NO_CREDITS = (
+    "⚠️ Os créditos da conta de API da Goodpack estão esgotados. "
+    "O agente TCO está temporariamente indisponível. "
+    "Por favor, avise o administrador do sistema para recarregar o saldo em console.anthropic.com."
+)
+_MSG_RATE_LIMIT = (
+    "⚠️ Muitas requisições simultâneas no momento. "
+    "Aguarde alguns segundos e tente novamente."
+)
+_MSG_CONNECTION = (
+    "⚠️ Não foi possível conectar ao serviço de IA. "
+    "Verifique a conexão com a internet e tente novamente."
+)
+_MSG_GENERIC = (
+    "⚠️ Erro inesperado ao chamar o agente. Tente novamente em alguns instantes. "
+    "Se o problema persistir, avise o administrador do sistema."
+)
 
 
 async def ask_agent(messages: list[dict], db: AsyncSession) -> str:
@@ -22,39 +42,59 @@ async def ask_agent(messages: list[dict], db: AsyncSession) -> str:
     então pedir outra ferramenta ou responder em texto. Repete até obter
     uma resposta final em texto ou atingir MAX_TOOL_ROUNDS.
 
+    Em caso de erro da API, retorna uma mensagem amigável em vez de
+    propagar a exceção — o frontend exibe como uma mensagem normal do agente.
+
     messages: lista de dicts no formato [{"role": "user"|"assistant", "content": "..."}]
     """
     conversation = list(messages)
 
-    for _ in range(MAX_TOOL_ROUNDS):
-        response = await client.messages.create(
-            model=settings.claude_model,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            messages=conversation,
-            tools=TOOLS,
-        )
+    try:
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = await client.messages.create(
+                model=settings.claude_model,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                messages=conversation,
+                tools=TOOLS,
+            )
 
-        if response.stop_reason != "tool_use":
-            text_blocks = [block.text for block in response.content if block.type == "text"]
-            return "\n".join(text_blocks)
+            if response.stop_reason != "tool_use":
+                text_blocks = [block.text for block in response.content if block.type == "text"]
+                return "\n".join(text_blocks)
 
-        # O agente pediu uma ou mais ferramentas — executa cada uma contra o banco real
-        conversation.append({"role": "assistant", "content": response.content})
+            # O agente pediu uma ou mais ferramentas — executa cada uma contra o banco real
+            conversation.append({"role": "assistant", "content": response.content})
 
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
-            result = await execute_tool(db, block.name, block.input)
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": str(result),
-            })
+            tool_results = []
+            for block in response.content:
+                if block.type != "tool_use":
+                    continue
+                result = await execute_tool(db, block.name, block.input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": str(result),
+                })
 
-        conversation.append({"role": "user", "content": tool_results})
+            conversation.append({"role": "user", "content": tool_results})
 
-    # Limite de rodadas atingido sem resposta final em texto — situação anômala,
-    # mas devolvemos algo coerente em vez de travar o vendedor sem resposta.
-    return "Não consegui concluir a consulta à base de conhecimento. Pode tentar reformular o pedido?"
+        # Limite de rodadas atingido sem resposta final em texto
+        return "Não consegui concluir a consulta à base de conhecimento. Pode tentar reformular o pedido?"
+
+    except APIStatusError as e:
+        # Crédito esgotado: HTTP 529 ou mensagem específica da Anthropic
+        body = str(e).lower()
+        if e.status_code == 529 or "credit" in body or "balance" in body or "billing" in body:
+            return _MSG_NO_CREDITS
+        # Outros erros HTTP da API (ex: 500 do lado da Anthropic)
+        return _MSG_GENERIC
+
+    except RateLimitError:
+        return _MSG_RATE_LIMIT
+
+    except APIConnectionError:
+        return _MSG_CONNECTION
+
+    except Exception:
+        return _MSG_GENERIC
