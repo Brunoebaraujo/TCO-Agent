@@ -20,6 +20,7 @@ class MessageIn(BaseModel):
     role: str
     content: str
     tco_result: dict | None = None
+    pending_text: str | None = None
 
 
 class SessionSaveRequest(BaseModel):

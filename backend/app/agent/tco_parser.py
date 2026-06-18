@@ -1,10 +1,14 @@
 """
-Extrai o bloco estruturado de resultado de TCO da resposta em texto do agente.
+Extrai blocos estruturados da resposta em texto do agente TCO.
 
-O agente é instruído (via system prompt) a emitir um bloco JSON delimitado por
-<<<TCO_RESULT>>> ... <<<END_TCO_RESULT>>> quando o cálculo estiver completo.
-Esta função separa esse bloco do texto conversacional, para que o frontend
-possa renderizar a tabela/gráfico em vez de mostrar o JSON cru.
+O agente emite dois tipos de bloco estruturado:
+- <<<TCO_RESULT>>> ... <<<END_TCO_RESULT>>>: JSON com o resultado completo do cálculo.
+- <<<PENDING>>> ... <<<END_PENDING>>>: texto corrido com as pendências para o vendedor
+  copiar e enviar ao cliente quando precisar pausar a conversa.
+
+Ambos são extraídos e retornados separadamente do texto conversacional, para que o
+frontend renderize cada um de forma adequada (dashboard para o TCO, painel copiável
+para as pendências) em vez de mostrar o conteúdo bruto ao usuário.
 """
 import json
 import re
@@ -15,10 +19,13 @@ _COMPLETE_PATTERN = re.compile(
     re.DOTALL,
 )
 
-# Fallback: bloco aberto mas sem marcador de fechamento (resposta truncada
-# por limite de tokens). Captura tudo até o final do texto.
 _TRUNCATED_PATTERN = re.compile(
     r"<<<TCO_RESULT>>>\s*(.*)$",
+    re.DOTALL,
+)
+
+_PENDING_PATTERN = re.compile(
+    r"<<<PENDING>>>\s*(.*?)\s*<<<END_PENDING>>>",
     re.DOTALL,
 )
 
@@ -31,13 +38,11 @@ def _try_repair_truncated_json(raw: str) -> Optional[dict]:
     """
     raw = raw.strip().rstrip(",")
 
-    # Remove a última linha se ela parecer incompleta (não termina em } , ] ou ")
     lines = raw.split("\n")
     while lines and not re.search(r'[\]}",]\s*$', lines[-1].rstrip()):
         lines.pop()
     candidate = "\n".join(lines).rstrip().rstrip(",")
 
-    # Tenta fechar chaves/colchetes pendentes, contando o que está aberto
     open_braces = candidate.count("{") - candidate.count("}")
     open_brackets = candidate.count("[") - candidate.count("]")
 
@@ -50,33 +55,41 @@ def _try_repair_truncated_json(raw: str) -> Optional[dict]:
         return None
 
 
-def extract_tco_result(text: str) -> Tuple[str, Optional[dict]]:
+def extract_tco_result(text: str) -> Tuple[str, Optional[dict], Optional[str]]:
     """
-    Retorna (texto_sem_o_bloco, dados_estruturados_ou_None).
+    Retorna (texto_limpo, tco_result_ou_None, pending_text_ou_None).
 
-    Tenta, em ordem:
-    1. Bloco completo e bem formado (caso normal).
-    2. Bloco aberto mas truncado (limite de tokens) — tenta reparar o JSON.
-    3. Nenhum bloco encontrado — retorna o texto original intacto.
+    Extrai e remove da resposta:
+    - O bloco <<<TCO_RESULT>>> (se presente) → retorna como dict
+    - O bloco <<<PENDING>>> (se presente) → retorna como string de texto
+
+    O texto restante (conversacional) é retornado limpo, sem os blocos.
     """
+    pending_text: Optional[str] = None
+    tco_result: Optional[dict] = None
+
+    # Extrai PENDING primeiro (não tem lógica de repair — é só texto)
+    pending_match = _PENDING_PATTERN.search(text)
+    if pending_match:
+        pending_text = pending_match.group(1).strip()
+        text = _PENDING_PATTERN.sub("", text)
+
+    # Extrai TCO_RESULT
     match = _COMPLETE_PATTERN.search(text)
     if match:
         raw_json = match.group(1)
         try:
-            data = json.loads(raw_json)
-            clean_text = _COMPLETE_PATTERN.sub("", text)
-            clean_text = re.sub(r"\n{3,}", "\n\n", clean_text).strip()
-            return clean_text, data
+            tco_result = json.loads(raw_json)
+            text = _COMPLETE_PATTERN.sub("", text)
         except json.JSONDecodeError:
-            return text, None
+            pass
+    else:
+        truncated_match = _TRUNCATED_PATTERN.search(text)
+        if truncated_match:
+            data = _try_repair_truncated_json(truncated_match.group(1))
+            if data:
+                tco_result = data
+                text = _TRUNCATED_PATTERN.sub("", text)
 
-    # Bloco truncado — tenta recuperar o que for possível
-    truncated_match = _TRUNCATED_PATTERN.search(text)
-    if truncated_match:
-        data = _try_repair_truncated_json(truncated_match.group(1))
-        if data:
-            clean_text = _TRUNCATED_PATTERN.sub("", text)
-            clean_text = re.sub(r"\n{3,}", "\n\n", clean_text).strip()
-            return clean_text, data
-
-    return text, None
+    clean_text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return clean_text, tco_result, pending_text

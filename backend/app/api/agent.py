@@ -42,12 +42,13 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             history = [m for m in history if m["role"] == "user"] or history
 
         raw_reply = await ask_agent(history, db)
-        clean_text, tco_result = extract_tco_result(raw_reply)
+        clean_text, tco_result, pending_text = extract_tco_result(raw_reply)
 
         return {
             "role": "assistant",
             "content": clean_text,
-            "tco_result": tco_result,  # None se o agente não gerou um resultado nesta resposta
+            "tco_result": tco_result,
+            "pending_text": pending_text,
         }
 
     except Exception as e:

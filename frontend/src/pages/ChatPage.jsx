@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Send, Loader2 } from 'lucide-react'
 import TCODashboard from '../components/tco/TCODashboard'
+import PendingPanel from '../components/tco/PendingPanel'
 
 const WELCOME_MESSAGE = {
   role: 'assistant',
@@ -67,6 +68,7 @@ export default function ChatPage() {
             role: m.role,
             content: m.content,
             tco_result: m.tco_result ?? null,
+            pending_text: m.pending_text ?? null,
           })),
         }),
       })
@@ -104,6 +106,7 @@ export default function ChatPage() {
         role: 'assistant',
         content: data.content,
         tco_result: data.tco_result ?? null,
+        pending_text: data.pending_text ?? null,
       }
       const finalMessages = [...messagesWithUser, assistantMessage]
       setMessages(finalMessages)
@@ -153,6 +156,7 @@ export default function ChatPage() {
                 </div>
               )}
               {msg.tco_result && <TCODashboard result={msg.tco_result} sessionId={sessionId} />}
+              {msg.pending_text && <PendingPanel text={msg.pending_text} />}
             </div>
           </div>
         ))}
