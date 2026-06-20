@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Send, Loader2 } from 'lucide-react'
 import TCODashboard from '../components/tco/TCODashboard'
 import PendingPanel from '../components/tco/PendingPanel'
+import ExpressForm from '../components/tco/ExpressForm'
 
 const WELCOME_MESSAGE = {
   role: 'assistant',
@@ -85,14 +86,12 @@ export default function ChatPage() {
     }
   }, [navigate])
 
-  async function sendMessage(e) {
-    e.preventDefault()
-    if (!input.trim() || loading) return
+  const submitUserMessage = useCallback(async (text) => {
+    if (!text.trim() || loading) return
 
-    const userMessage = { role: 'user', content: input.trim() }
+    const userMessage = { role: 'user', content: text.trim() }
     const messagesWithUser = [...messages, userMessage]
     setMessages(messagesWithUser)
-    setInput('')
     setLoading(true)
 
     try {
@@ -122,7 +121,20 @@ export default function ChatPage() {
     } finally {
       setLoading(false)
     }
+  }, [messages, loading, sessionId, persistSession])
+
+  async function sendMessage(e) {
+    e.preventDefault()
+    if (!input.trim() || loading) return
+    const text = input
+    setInput('')
+    await submitUserMessage(text)
   }
+
+  // Formulário express só aparece numa análise nova, antes de qualquer
+  // mensagem trocada — depois da primeira resposta, segue como chat normal
+  // (refinamento, perguntas de acompanhamento, customização completa via texto).
+  const showExpressForm = !sessionId && messages.length === 1
 
   if (loadingSession) {
     return (
@@ -145,6 +157,10 @@ export default function ChatPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+        {showExpressForm && (
+          <ExpressForm onSubmit={submitUserMessage} loading={loading} />
+        )}
+
         {messages.map((msg, i) => (
           <div key={i} className={msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
             {msg.role === 'assistant' && (
