@@ -31,16 +31,22 @@ export default function TCODashboard({ result, sessionId }) {
   const [breakdown, setBreakdown] = useState(() =>
     (result?.packaging_breakdown ?? []).map(item => ({ ...item }))
   )
+  const [competitorBreakdown, setCompetitorBreakdown] = useState(() =>
+    (result?.competitor_packaging_breakdown ?? []).map(item => ({ ...item }))
+  )
   const [qtyPerUnit, setQtyPerUnit] = useState(result?.goodpack_qty_per_unit_kg ?? null)
   const [confirmedItems, setConfirmedItems] = useState(() => new Set())
+  const [confirmedCompetitorItems, setConfirmedCompetitorItems] = useState(() => new Set())
   const [fullCustomization, setFullCustomization] = useState(false)
   const [handlingPackerPerUnit, setHandlingPackerPerUnit] = useState(null)
   const [handlingEnduserPerUnit, setHandlingEnduserPerUnit] = useState(null)
 
   useEffect(() => {
     setBreakdown((result?.packaging_breakdown ?? []).map(item => ({ ...item })))
+    setCompetitorBreakdown((result?.competitor_packaging_breakdown ?? []).map(item => ({ ...item })))
     setQtyPerUnit(result?.goodpack_qty_per_unit_kg ?? null)
     setConfirmedItems(new Set())
+    setConfirmedCompetitorItems(new Set())
     setFullCustomization(false)
     const packerCat = result?.categories?.find(c => c.label === 'Handling packer')
     const enduserCat = result?.categories?.find(c => c.label === 'Handling enduser')
@@ -56,8 +62,11 @@ export default function TCODashboard({ result, sessionId }) {
   const packagingCategory = categories.find(c => c.label === 'Packaging')
   const originalPackagingPerUnit = packagingCategory?.goodpack_per_unit ?? 0
   const originalPackagingPerMt = packagingCategory?.goodpack ?? 0
+  const originalCompetitorPackagingPerUnit = packagingCategory?.competitor_per_unit ?? 0
+  const originalCompetitorPackagingPerMt = packagingCategory?.competitor ?? 0
 
   const hasEditableBreakdown = breakdown.length > 0
+  const hasEditableCompetitorBreakdown = competitorBreakdown.length > 0
   const hasEditableQty = qtyPerUnit != null
 
   const handlingPackerCategory = categories.find(c => c.label === 'Handling packer')
@@ -80,9 +89,18 @@ export default function TCODashboard({ result, sessionId }) {
     // ajustada pela mesma proporção de qty (se a qty também mudou).
     const categoryOverrides = {}
 
-    if (hasEditableBreakdown) {
-      const pkg = recalcPackagingByPrice(breakdown, originalPackagingPerUnit, originalPackagingPerMt)
-      categoryOverrides.Packaging = { perMt: pkg.perMt * qtyRatio }
+    if (hasEditableBreakdown || hasEditableCompetitorBreakdown) {
+      categoryOverrides.Packaging = categoryOverrides.Packaging || {}
+      if (hasEditableBreakdown) {
+        const pkg = recalcPackagingByPrice(breakdown, originalPackagingPerUnit, originalPackagingPerMt)
+        categoryOverrides.Packaging.perMt = pkg.perMt * qtyRatio
+      }
+      if (hasEditableCompetitorBreakdown) {
+        const compPkg = recalcPackagingByPrice(
+          competitorBreakdown, originalCompetitorPackagingPerUnit, originalCompetitorPackagingPerMt
+        )
+        categoryOverrides.Packaging.competitorPerMt = compPkg.perMt
+      }
     }
 
     if (fullCustomization && handlingPackerCategory && handlingPackerPerUnit != null) {
@@ -119,8 +137,9 @@ export default function TCODashboard({ result, sessionId }) {
 
     return { totals, logistics }
   }, [
-    breakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty,
-    originalPackagingPerUnit, originalPackagingPerMt, categories,
+    breakdown, competitorBreakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty,
+    hasEditableCompetitorBreakdown, originalPackagingPerUnit, originalPackagingPerMt,
+    originalCompetitorPackagingPerUnit, originalCompetitorPackagingPerMt, categories,
     fullCustomization, handlingPackerPerUnit, handlingEnduserPerUnit,
     handlingPackerCategory, handlingEnduserCategory,
   ])
@@ -163,10 +182,20 @@ export default function TCODashboard({ result, sessionId }) {
     setConfirmedItems(prev => new Set(prev).add(index))
   }
 
+  function handleCompetitorBreakdownChange(index, newValue) {
+    setCompetitorBreakdown(prev => prev.map((item, i) => i === index ? { ...item, value: newValue } : item))
+  }
+
+  function handleConfirmCompetitorItem(index) {
+    setConfirmedCompetitorItems(prev => new Set(prev).add(index))
+  }
+
   function handleReset() {
     setBreakdown((result?.packaging_breakdown ?? []).map(item => ({ ...item })))
+    setCompetitorBreakdown((result?.competitor_packaging_breakdown ?? []).map(item => ({ ...item })))
     setQtyPerUnit(result?.goodpack_qty_per_unit_kg ?? null)
     setConfirmedItems(new Set())
+    setConfirmedCompetitorItems(new Set())
     setFullCustomization(false)
     setHandlingPackerPerUnit(handlingPackerCategory?.goodpack_per_unit ?? null)
     setHandlingEnduserPerUnit(handlingEnduserCategory?.goodpack_per_unit ?? null)
@@ -181,10 +210,10 @@ export default function TCODashboard({ result, sessionId }) {
 
     const categoriesForChart = recalculated.totals.categoriesRecalced ?? categories
     const goodpackData = categoriesForChart.map(c => c.goodpack)
-    const competitorData = categories.map(c => c.competitor)
+    const competitorData = categoriesForChart.map(c => c.competitor)
 
     const goodpackTotal = recalculated.totals.goodpackTotalPerMt
-    const competitorTotal = result.competitor_total_per_mt
+    const competitorTotal = recalculated.totals.competitorTotalPerMt ?? result.competitor_total_per_mt
     const totals = [goodpackTotal, competitorTotal]
     const maxTotal = Math.max(...totals.filter(t => t != null))
 
@@ -266,6 +295,8 @@ export default function TCODashboard({ result, sessionId }) {
   const isEdited = (hasEditableBreakdown && result.packaging_breakdown && (
     breakdown.some((item, i) => item.value !== result.packaging_breakdown[i]?.value)
     || qtyPerUnit !== result.goodpack_qty_per_unit_kg
+  )) || (hasEditableCompetitorBreakdown && result.competitor_packaging_breakdown && (
+    competitorBreakdown.some((item, i) => item.value !== result.competitor_packaging_breakdown[i]?.value)
   )) || (fullCustomization && (
     handlingPackerPerUnit !== (handlingPackerCategory?.goodpack_per_unit ?? null)
     || handlingEnduserPerUnit !== (handlingEnduserCategory?.goodpack_per_unit ?? null)
@@ -298,62 +329,96 @@ export default function TCODashboard({ result, sessionId }) {
 
         <div className="flex flex-col gap-3">
 
-          {hasEditableBreakdown && (
-            <div className="bg-slate-50 rounded-lg p-3.5">
-              <p className="text-xs font-medium text-slate-700">Packaging — {goodpackSku}</p>
-              <p className="text-[11px] text-slate-400 mb-2.5">Editável — afeta o gráfico</p>
-              <div className="flex flex-col gap-2.5">
-                {breakdown.map((item, i) => {
-                  const matched = matchAssumption(item.label, assumptions)
-                  const isPending = matched?.confidence_level === 'validation_required' && !confirmedItems.has(i)
-                  const isConfirmed = confirmedItems.has(i)
-                  return (
-                    <div
-                      key={i}
-                      className={
-                        isPending
-                          ? 'rounded-md border p-2 border-amber-300 bg-amber-50'
-                          : isConfirmed
-                          ? 'rounded-md border p-2 border-emerald-200'
-                          : ''
-                      }
-                    >
-                      <label className="text-[11px] text-slate-500 flex items-center gap-1 mb-1">
-                        {isPending && <AlertTriangle size={11} className="text-amber-500" />}
-                        {isConfirmed && <Check size={11} className="text-emerald-500" />}
-                        {item.label}
-                      </label>
-                      <div className="flex gap-1.5">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.value}
-                          onChange={(e) => handleBreakdownChange(i, parseFloat(e.target.value) || 0)}
-                          className={
-                            'flex-1 text-sm border rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 ' +
-                            (isPending
-                              ? 'border-amber-300 focus:ring-amber-300'
-                              : 'border-blue-200 focus:ring-blue-300')
-                          }
-                        />
-                        {isPending && (
-                          <button
-                            onClick={() => handleConfirmItem(i)}
-                            className="text-[11px] px-2 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors whitespace-nowrap"
-                          >
-                            Confirmar
-                          </button>
-                        )}
+          {(hasEditableBreakdown || hasEditableCompetitorBreakdown) && (() => {
+            const labels = []
+            breakdown.forEach(item => { if (!labels.includes(item.label)) labels.push(item.label) })
+            competitorBreakdown.forEach(item => { if (!labels.includes(item.label)) labels.push(item.label) })
+
+            return (
+              <div className="bg-slate-50 rounded-lg p-3.5">
+                <p className="text-xs font-medium text-slate-700">Packaging — {goodpackSku} vs {competitorName}</p>
+                <p className="text-[11px] text-slate-400 mb-2">Editável — afeta o gráfico dos dois lados</p>
+                <div className="grid grid-cols-[1fr_56px_56px] gap-x-1.5 gap-y-1 items-center text-[10px] text-slate-400 mb-1">
+                  <span></span>
+                  <span className="text-center">GP</span>
+                  <span className="text-center">Conc.</span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {labels.map((label, rowI) => {
+                    const gpIdx = breakdown.findIndex(item => item.label === label)
+                    const compIdx = competitorBreakdown.findIndex(item => item.label === label)
+
+                    const gpMatched = gpIdx >= 0 ? matchAssumption(label + ' (Goodpack)', assumptions) ?? matchAssumption(label, assumptions) : null
+                    const compMatched = compIdx >= 0 ? matchAssumption(label + ' (Concorrente)', assumptions) ?? matchAssumption(label, assumptions) : null
+                    const gpPending = gpMatched?.confidence_level === 'validation_required' && !confirmedItems.has(gpIdx)
+                    const compPending = compMatched?.confidence_level === 'validation_required' && !confirmedCompetitorItems.has(compIdx)
+                    const gpConfirmed = confirmedItems.has(gpIdx)
+                    const compConfirmed = confirmedCompetitorItems.has(compIdx)
+                    const rowPending = gpPending || compPending
+
+                    return (
+                      <div
+                        key={rowI}
+                        className={
+                          'grid grid-cols-[1fr_56px_56px] gap-x-1.5 items-center rounded-md px-1 py-1 ' +
+                          (rowPending ? 'border border-amber-300 bg-amber-50' : '')
+                        }
+                      >
+                        <label className="text-[11px] text-slate-600 flex items-center gap-1 truncate" title={label}>
+                          {rowPending && <AlertTriangle size={10} className="text-amber-500 shrink-0" />}
+                          {!rowPending && (gpConfirmed || compConfirmed) && <Check size={10} className="text-emerald-500 shrink-0" />}
+                          {label}
+                        </label>
+
+                        {gpIdx >= 0 ? (
+                          <input
+                            type="number" step="0.01"
+                            value={breakdown[gpIdx].value}
+                            onChange={(e) => handleBreakdownChange(gpIdx, parseFloat(e.target.value) || 0)}
+                            className={
+                              'w-full text-xs border rounded px-1.5 py-1 focus:outline-none focus:ring-1 text-right ' +
+                              (gpPending ? 'border-amber-300 focus:ring-amber-300' : 'border-blue-200 focus:ring-blue-300')
+                            }
+                          />
+                        ) : <span className="text-center text-slate-300 text-xs">—</span>}
+
+                        {compIdx >= 0 ? (
+                          <input
+                            type="number" step="0.01"
+                            value={competitorBreakdown[compIdx].value}
+                            onChange={(e) => handleCompetitorBreakdownChange(compIdx, parseFloat(e.target.value) || 0)}
+                            className={
+                              'w-full text-xs border rounded px-1.5 py-1 focus:outline-none focus:ring-1 text-right ' +
+                              (compPending ? 'border-amber-300 focus:ring-amber-300' : 'border-blue-200 focus:ring-blue-300')
+                            }
+                          />
+                        ) : <span className="text-center text-slate-300 text-xs">—</span>}
                       </div>
-                      {isPending && (
-                        <p className="text-[10px] text-amber-600 mt-1">Estimativa — confirmar com o cliente</p>
-                      )}
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
+
+                {labels.some((label, rowI) => {
+                  const gpIdx = breakdown.findIndex(item => item.label === label)
+                  const compIdx = competitorBreakdown.findIndex(item => item.label === label)
+                  const gpMatched = gpIdx >= 0 ? matchAssumption(label, assumptions) : null
+                  const compMatched = compIdx >= 0 ? matchAssumption(label, assumptions) : null
+                  return (gpMatched?.confidence_level === 'validation_required' && !confirmedItems.has(gpIdx))
+                    || (compMatched?.confidence_level === 'validation_required' && !confirmedCompetitorItems.has(compIdx))
+                }) && (
+                  <button
+                    onClick={() => {
+                      setConfirmedItems(new Set(breakdown.map((_, i) => i)))
+                      setConfirmedCompetitorItems(new Set(competitorBreakdown.map((_, i) => i)))
+                    }}
+                    className="text-[11px] text-amber-700 hover:underline mt-2"
+                  >
+                    Confirmar todos os valores acima
+                  </button>
+                )}
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           <button
             onClick={() => setFullCustomization(v => !v)}
@@ -426,7 +491,7 @@ export default function TCODashboard({ result, sessionId }) {
               <div className="border-t border-slate-200 my-1" />
               <div className="flex justify-between">
                 <span className="text-slate-500">{competitorName} — total</span>
-                <span className="text-slate-700">{formatCurrency(result.competitor_total_per_mt, currency)}/MT</span>
+                <span className="text-slate-700">{formatCurrency(recalculated.totals.competitorTotalPerMt ?? result.competitor_total_per_mt, currency)}/MT</span>
               </div>
             </div>
           </div>

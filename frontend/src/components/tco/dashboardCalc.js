@@ -140,21 +140,25 @@ export function recalcTotals(result, categoryOverrides, recalcedByQty) {
 
   const categoriesRecalced = categories.map(cat => {
     const override = overrides[cat.label]
-    if (override) {
-      return { ...cat, goodpack: override.perMt ?? cat.goodpack }
-    }
     const rc = recalcedByQty?.[cat.label]
-    return rc ? { ...cat, goodpack: rc.perMt ?? cat.goodpack } : cat
+    return {
+      ...cat,
+      goodpack: override?.perMt ?? rc?.perMt ?? cat.goodpack,
+      competitor: override?.competitorPerMt ?? cat.competitor,
+    }
   })
 
   const goodpackTotalPerMt = categoriesRecalced.reduce(
     (sum, c) => sum + (Number(c.goodpack) || 0), 0
   )
-  const competitorTotalPerMt = result.competitor_total_per_mt || 0
+  const hasCompetitorOverride = Object.values(overrides).some(o => o?.competitorPerMt != null)
+  const competitorTotalPerMt = hasCompetitorOverride
+    ? categoriesRecalced.reduce((sum, c) => sum + (Number(c.competitor) || 0), 0)
+    : (result.competitor_total_per_mt || 0)
   const simulatedMt = result.simulated_metric_tonnes || 0
   const savingPerMt = competitorTotalPerMt - goodpackTotalPerMt
   const totalSaving = savingPerMt * simulatedMt
   const savingPercentage = competitorTotalPerMt > 0 ? (savingPerMt / competitorTotalPerMt) * 100 : 0
 
-  return { goodpackTotalPerMt, totalSaving, savingPercentage, categoriesRecalced }
+  return { goodpackTotalPerMt, competitorTotalPerMt, totalSaving, savingPercentage, categoriesRecalced }
 }
