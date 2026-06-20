@@ -18,9 +18,26 @@
  */
 
 /**
- * Recalcula Packaging a partir do breakdown editado.
- * Usa proporção simples (delta de preço escala o $/MT original) para
- * não divergir dos cálculos do agente por diferenças de arredondamento.
+ * Recalcula uma categoria a partir de um novo valor por unidade, escalando
+ * o $/MT original pela mesma proporção (delta de preço escala o $/MT
+ * original) para não divergir dos cálculos do agente por diferenças de
+ * arredondamento. Usado tanto para Packaging (breakdown somado) quanto
+ * para Handling packer/enduser (valor único editável no modo Customização
+ * completa).
+ *
+ * @param {number} newPerUnit
+ * @param {number} originalPerUnit
+ * @param {number} originalPerMt
+ * @returns {{ perUnit: number, perMt: number }}
+ */
+export function recalcCategoryByUnitPrice(newPerUnit, originalPerUnit, originalPerMt) {
+  const scaleFactor = originalPerUnit > 0 ? newPerUnit / originalPerUnit : 1
+  return { perUnit: newPerUnit, perMt: originalPerMt * scaleFactor }
+}
+
+/**
+ * Recalcula Packaging a partir do breakdown editado (soma os itens e
+ * delega para recalcCategoryByUnitPrice).
  *
  * @param {Array<{label, value}>} breakdown - itens editados
  * @param {number} originalPerUnit - soma original do breakdown (goodpack_per_unit de Packaging)
@@ -29,8 +46,24 @@
  */
 export function recalcPackagingByPrice(breakdown, originalPerUnit, originalPerMt) {
   const newPerUnit = breakdown.reduce((sum, item) => sum + (Number(item.value) || 0), 0)
-  const scaleFactor = originalPerUnit > 0 ? newPerUnit / originalPerUnit : 1
-  return { perUnit: newPerUnit, perMt: originalPerMt * scaleFactor }
+  return recalcCategoryByUnitPrice(newPerUnit, originalPerUnit, originalPerMt)
+}
+
+/**
+ * Encontra a premissa (assumptions) correspondente a um item do
+ * packaging_breakdown, por correspondência de texto no label (ex: item
+ * "Aseptic Bag" casa com a premissa "Acessório Aseptic Bag (Goodpack)").
+ * Usado para decidir se um item de Packaging deve aparecer como pendente
+ * de confirmação (confidence_level "validation_required") no dashboard.
+ *
+ * @param {string} itemLabel
+ * @param {Array<{label, confidence_level, source}>} assumptions
+ * @returns {{label, confidence_level, source}|null}
+ */
+export function matchAssumption(itemLabel, assumptions = []) {
+  if (!itemLabel) return null
+  const needle = itemLabel.toLowerCase()
+  return assumptions.find(a => (a.label || '').toLowerCase().includes(needle)) || null
 }
 
 /**
@@ -87,20 +120,28 @@ export function recalcLogistics(simulatedMt, qtyPerUnitKg, qtyPerTransport, stac
 }
 
 /**
- * Combina os custos recalculados (Packaging por preço + demais por qty) e
- * calcula os totais finais.
+ * Combina os custos recalculados (categorias com override de preço +
+ * demais por qty) e calcula os totais finais.
  *
  * @param {object} result - TCO_RESULT original
- * @param {number} newPackagingPerMt
+ * @param {Object} categoryOverrides - mapa label → { perMt } para categorias com preço editado
+ *   (ex: { Packaging: {perMt}, 'Handling packer': {perMt} }) — aceita também o formato antigo
+ *   (number) para manter compatibilidade com chamadas existentes que passavam só o Packaging.
  * @param {Object|null} recalcedByQty - mapa de categorias recalculadas por qty, ou null
  * @returns {{ goodpackTotalPerMt, totalSaving, savingPercentage, categoriesRecalced }}
  */
-export function recalcTotals(result, newPackagingPerMt, recalcedByQty) {
+export function recalcTotals(result, categoryOverrides, recalcedByQty) {
   const categories = result.categories || []
 
+  // Compatibilidade: chamadas antigas passavam newPackagingPerMt (number) direto.
+  const overrides = typeof categoryOverrides === 'number'
+    ? { Packaging: { perMt: categoryOverrides } }
+    : (categoryOverrides || {})
+
   const categoriesRecalced = categories.map(cat => {
-    if (cat.label === 'Packaging') {
-      return { ...cat, goodpack: newPackagingPerMt ?? cat.goodpack }
+    const override = overrides[cat.label]
+    if (override) {
+      return { ...cat, goodpack: override.perMt ?? cat.goodpack }
     }
     const rc = recalcedByQty?.[cat.label]
     return rc ? { ...cat, goodpack: rc.perMt ?? cat.goodpack } : cat

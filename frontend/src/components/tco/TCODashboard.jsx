@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, ChevronDown, Loader2, Truck, Package, Layers, Boxes, TrendingUp, RotateCcw } from 'lucide-react'
+import { Download, ChevronDown, Loader2, Truck, Package, Layers, Boxes, TrendingUp, RotateCcw, AlertTriangle, Check, SlidersHorizontal } from 'lucide-react'
 import ConfidenceBadge from '../ui/ConfidenceBadge'
-import { recalcPackagingByPrice, recalcCategoriesByQty, recalcLogistics, recalcTotals } from './dashboardCalc'
+import {
+  recalcPackagingByPrice, recalcCategoryByUnitPrice, recalcCategoriesByQty,
+  recalcLogistics, recalcTotals, matchAssumption,
+} from './dashboardCalc'
 
 const STACK_COLORS = ['#378ADD', '#888780', '#85B7EB', '#BA7517', '#1D9E75']
 
@@ -29,10 +32,20 @@ export default function TCODashboard({ result, sessionId }) {
     (result?.packaging_breakdown ?? []).map(item => ({ ...item }))
   )
   const [qtyPerUnit, setQtyPerUnit] = useState(result?.goodpack_qty_per_unit_kg ?? null)
+  const [confirmedItems, setConfirmedItems] = useState(() => new Set())
+  const [fullCustomization, setFullCustomization] = useState(false)
+  const [handlingPackerPerUnit, setHandlingPackerPerUnit] = useState(null)
+  const [handlingEnduserPerUnit, setHandlingEnduserPerUnit] = useState(null)
 
   useEffect(() => {
     setBreakdown((result?.packaging_breakdown ?? []).map(item => ({ ...item })))
     setQtyPerUnit(result?.goodpack_qty_per_unit_kg ?? null)
+    setConfirmedItems(new Set())
+    setFullCustomization(false)
+    const packerCat = result?.categories?.find(c => c.label === 'Handling packer')
+    const enduserCat = result?.categories?.find(c => c.label === 'Handling enduser')
+    setHandlingPackerPerUnit(packerCat?.goodpack_per_unit ?? null)
+    setHandlingEnduserPerUnit(enduserCat?.goodpack_per_unit ?? null)
   }, [result])
 
   const categories = result?.categories ?? []
@@ -47,6 +60,9 @@ export default function TCODashboard({ result, sessionId }) {
   const hasEditableBreakdown = breakdown.length > 0
   const hasEditableQty = qtyPerUnit != null
 
+  const handlingPackerCategory = categories.find(c => c.label === 'Handling packer')
+  const handlingEnduserCategory = categories.find(c => c.label === 'Handling enduser')
+
   const recalculated = useMemo(() => {
     const origQtyKg = result?.goodpack_qty_per_unit_kg ?? null
     const effectiveQty = hasEditableQty ? qtyPerUnit : origQtyKg
@@ -54,23 +70,35 @@ export default function TCODashboard({ result, sessionId }) {
     const qtyPerTransport = result?.goodpack_qty_per_transport ?? null
     const stackFullWarehouse = result?.goodpack_stack_full_warehouse ?? null
     const transportCostPerContainer = result?.goodpack_transport_cost_per_container ?? null
-
-    // Recalcula Packaging pelo delta de preço do breakdown
-    const pkg = hasEditableBreakdown
-      ? recalcPackagingByPrice(breakdown, originalPackagingPerUnit, originalPackagingPerMt)
-      : { perUnit: originalPackagingPerUnit, perMt: originalPackagingPerMt }
-
-    // Se qty mudou, todas as categorias recalculam pela nova quantidade
-    // Packaging também precisa ser ajustado proporcionalmente à qty
-    const pkgPerMtFinal = qtyChanged && origQtyKg
-      ? pkg.perMt * (origQtyKg / effectiveQty)
-      : pkg.perMt
+    const qtyRatio = qtyChanged && origQtyKg ? origQtyKg / effectiveQty : 1
 
     const recalcedByQty = qtyChanged && effectiveQty
       ? recalcCategoriesByQty(categories, effectiveQty, origQtyKg, qtyPerTransport, transportCostPerContainer)
       : null
 
-    const totals = recalcTotals(result ?? {}, pkgPerMtFinal, recalcedByQty)
+    // Cada categoria com preço editável é recalculada pelo preço e depois
+    // ajustada pela mesma proporção de qty (se a qty também mudou).
+    const categoryOverrides = {}
+
+    if (hasEditableBreakdown) {
+      const pkg = recalcPackagingByPrice(breakdown, originalPackagingPerUnit, originalPackagingPerMt)
+      categoryOverrides.Packaging = { perMt: pkg.perMt * qtyRatio }
+    }
+
+    if (fullCustomization && handlingPackerCategory && handlingPackerPerUnit != null) {
+      const hp = recalcCategoryByUnitPrice(
+        handlingPackerPerUnit, handlingPackerCategory.goodpack_per_unit ?? 0, handlingPackerCategory.goodpack ?? 0
+      )
+      categoryOverrides['Handling packer'] = { perMt: hp.perMt * qtyRatio }
+    }
+    if (fullCustomization && handlingEnduserCategory && handlingEnduserPerUnit != null) {
+      const he = recalcCategoryByUnitPrice(
+        handlingEnduserPerUnit, handlingEnduserCategory.goodpack_per_unit ?? 0, handlingEnduserCategory.goodpack ?? 0
+      )
+      categoryOverrides['Handling enduser'] = { perMt: he.perMt * qtyRatio }
+    }
+
+    const totals = recalcTotals(result ?? {}, categoryOverrides, recalcedByQty)
 
     // Logística
     let logistics = result?.logistics
@@ -89,8 +117,13 @@ export default function TCODashboard({ result, sessionId }) {
       }
     }
 
-    return { packaging: pkg, totals, logistics }
-  }, [breakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty, originalPackagingPerUnit, originalPackagingPerMt, categories])
+    return { totals, logistics }
+  }, [
+    breakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty,
+    originalPackagingPerUnit, originalPackagingPerMt, categories,
+    fullCustomization, handlingPackerPerUnit, handlingEnduserPerUnit,
+    handlingPackerCategory, handlingEnduserCategory,
+  ])
 
   async function handleExport(includeAssumptions) {
     if (!sessionId) return
@@ -126,9 +159,17 @@ export default function TCODashboard({ result, sessionId }) {
     setBreakdown(prev => prev.map((item, i) => i === index ? { ...item, value: newValue } : item))
   }
 
+  function handleConfirmItem(index) {
+    setConfirmedItems(prev => new Set(prev).add(index))
+  }
+
   function handleReset() {
     setBreakdown((result?.packaging_breakdown ?? []).map(item => ({ ...item })))
     setQtyPerUnit(result?.goodpack_qty_per_unit_kg ?? null)
+    setConfirmedItems(new Set())
+    setFullCustomization(false)
+    setHandlingPackerPerUnit(handlingPackerCategory?.goodpack_per_unit ?? null)
+    setHandlingEnduserPerUnit(handlingEnduserCategory?.goodpack_per_unit ?? null)
   }
 
   useEffect(() => {
@@ -222,10 +263,13 @@ export default function TCODashboard({ result, sessionId }) {
     { icon: Boxes, label: 'Full stacks', gp: logistics.goodpack?.full_stacks, comp: logistics.competitor?.full_stacks },
   ] : []
 
-  const isEdited = hasEditableBreakdown && result.packaging_breakdown && (
+  const isEdited = (hasEditableBreakdown && result.packaging_breakdown && (
     breakdown.some((item, i) => item.value !== result.packaging_breakdown[i]?.value)
     || qtyPerUnit !== result.goodpack_qty_per_unit_kg
-  )
+  )) || (fullCustomization && (
+    handlingPackerPerUnit !== (handlingPackerCategory?.goodpack_per_unit ?? null)
+    || handlingEnduserPerUnit !== (handlingEnduserCategory?.goodpack_per_unit ?? null)
+  ))
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5 max-w-5xl">
@@ -259,19 +303,99 @@ export default function TCODashboard({ result, sessionId }) {
               <p className="text-xs font-medium text-slate-700">Packaging — {goodpackSku}</p>
               <p className="text-[11px] text-slate-400 mb-2.5">Editável — afeta o gráfico</p>
               <div className="flex flex-col gap-2.5">
-                {breakdown.map((item, i) => (
-                  <div key={i}>
-                    <label className="text-[11px] text-slate-500 block mb-1">{item.label}</label>
+                {breakdown.map((item, i) => {
+                  const matched = matchAssumption(item.label, assumptions)
+                  const isPending = matched?.confidence_level === 'validation_required' && !confirmedItems.has(i)
+                  const isConfirmed = confirmedItems.has(i)
+                  return (
+                    <div
+                      key={i}
+                      className={
+                        isPending
+                          ? 'rounded-md border p-2 border-amber-300 bg-amber-50'
+                          : isConfirmed
+                          ? 'rounded-md border p-2 border-emerald-200'
+                          : ''
+                      }
+                    >
+                      <label className="text-[11px] text-slate-500 flex items-center gap-1 mb-1">
+                        {isPending && <AlertTriangle size={11} className="text-amber-500" />}
+                        {isConfirmed && <Check size={11} className="text-emerald-500" />}
+                        {item.label}
+                      </label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={item.value}
+                          onChange={(e) => handleBreakdownChange(i, parseFloat(e.target.value) || 0)}
+                          className={
+                            'flex-1 text-sm border rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 ' +
+                            (isPending
+                              ? 'border-amber-300 focus:ring-amber-300'
+                              : 'border-blue-200 focus:ring-blue-300')
+                          }
+                        />
+                        {isPending && (
+                          <button
+                            onClick={() => handleConfirmItem(i)}
+                            className="text-[11px] px-2 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors whitespace-nowrap"
+                          >
+                            Confirmar
+                          </button>
+                        )}
+                      </div>
+                      {isPending && (
+                        <p className="text-[10px] text-amber-600 mt-1">Estimativa — confirmar com o cliente</p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={() => setFullCustomization(v => !v)}
+            className="flex items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2 py-2 rounded-md border border-slate-200 hover:bg-slate-50 transition-colors"
+          >
+            <SlidersHorizontal size={12} />
+            {fullCustomization ? 'Voltar ao modo express' : 'Customização completa'}
+          </button>
+
+          {fullCustomization && (
+            <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200">
+              <p className="text-xs font-medium text-slate-700">Parâmetros avançados</p>
+              <p className="text-[11px] text-slate-400 mb-2.5">Handling — {goodpackSku}</p>
+              <div className="flex flex-col gap-2.5">
+                {handlingPackerCategory && (
+                  <div>
+                    <label className="text-[11px] text-slate-500 block mb-1">Handling packer (por unidade)</label>
                     <input
                       type="number"
                       step="0.01"
-                      value={item.value}
-                      onChange={(e) => handleBreakdownChange(i, parseFloat(e.target.value) || 0)}
+                      value={handlingPackerPerUnit ?? ''}
+                      onChange={(e) => setHandlingPackerPerUnit(parseFloat(e.target.value) || 0)}
                       className="w-full text-sm border border-blue-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-300"
                     />
                   </div>
-                ))}
+                )}
+                {handlingEnduserCategory && (
+                  <div>
+                    <label className="text-[11px] text-slate-500 block mb-1">Handling enduser (por unidade)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={handlingEnduserPerUnit ?? ''}
+                      onChange={(e) => setHandlingEnduserPerUnit(parseFloat(e.target.value) || 0)}
+                      className="w-full text-sm border border-blue-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                    />
+                  </div>
+                )}
               </div>
+              <p className="text-[10px] text-slate-400 mt-2">
+                Tipo de transporte ainda não é editável aqui — depende de dado que falta expor no resultado do agente.
+              </p>
             </div>
           )}
 
