@@ -243,11 +243,11 @@ Quando você gerar um TCO_RESULT usando valores do bloco `[VALORES CONFIRMADOS N
 default permanente da base — ou seja, mapeia pra UM campo único e claro:
 
 - **Preço de acessório** (ex: "Poly Liner (Goodpack)", "Poly Liner (Concorrente)") — elegível.
-- **Volume (L)**, **Peso nominal (kg)**, **Quantidade por container** — elegível.
+- **Quantidade por container** — elegível (mapeia direto pra qty_20ft_dry/qty_40ft_dry/etc da embalagem).
 - **NÃO elegível**: Unit cost (preço comercial, nunca vira benchmark — é sempre específico do \
-negócio), Quantidade envasada/qty_per_unit_kg (é calculada, não armazenada em lugar nenhum), \
-Handling packer/enduser totais (são soma de ~10 parâmetros — não dá pra escrever de volta um \
-total agregado num campo só).
+negócio), Peso envasado/qty_per_unit_kg (é o fato prático daquele negócio, não uma spec de \
+catálogo — varia por cliente, não deve virar default geral), Handling packer/enduser totais (são \
+soma de ~10 parâmetros — não dá pra escrever de volta um total agregado num campo só).
 
 Se houver pelo menos um item elegível, pergunte ao final da sua resposta (depois do bloco \
 TCO_RESULT, no texto), algo como: "Notei que você ajustou o preço do Poly Liner pra $2,50 — quer \

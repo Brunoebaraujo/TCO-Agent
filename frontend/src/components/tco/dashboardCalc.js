@@ -189,14 +189,11 @@ export function recalcTotals(result, categoryOverrides, recalcedByQtyGoodpack, r
 }
 
 const OVERRIDE_LABELS = {
-  qtyPerUnit: 'Quantidade envasada Goodpack (kg/unidade)',
+  qtyPerUnit: 'Peso envasado Goodpack (kg/unidade)',
+  competitorQtyPerUnit: 'Peso envasado concorrente (kg/unidade)',
   handlingPackerPerUnit: 'Handling packer Goodpack (por unidade)',
   handlingEnduserPerUnit: 'Handling enduser Goodpack (por unidade)',
-  goodpackVolumeLiters: 'Volume Goodpack (L)',
-  goodpackMaxPayloadKg: 'Peso nominal Goodpack (kg)',
   goodpackQtyPerTransport: 'Quantidade Goodpack por container',
-  competitorVolumeLiters: 'Volume concorrente (L)',
-  competitorMaxPayloadKg: 'Peso nominal concorrente (kg)',
   competitorQtyPerTransport: 'Quantidade concorrente por container',
 }
 
