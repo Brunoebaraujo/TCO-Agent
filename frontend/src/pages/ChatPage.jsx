@@ -6,15 +6,18 @@ import PendingPanel from '../components/tco/PendingPanel'
 
 const WELCOME_MESSAGE = {
   role: 'assistant',
-  content: `Olá! Sou o agente TCO da Goodpack.
+  content: `Olá! Sou o agente TCO da Goodpack — modo express: me dá esses 9 dados de uma vez e eu já calculo um TCO preliminar na hora.
 
-Para gerar uma análise, me informe:
-• **Cliente** — nome da empresa
-• **Produto** — o que será transportado (ex: Omega 3, Palm Oil, FCOJ)
-• **Volume** — em Metric Tonnes
-• **Concorrente atual** — qual embalagem o cliente usa hoje (ex: Octabin, Drum 200L)
+• **SKU Goodpack** (ex: MB6)
+• **SKU/embalagem concorrente** (ex: Octabin)
+• **Produto** (ex: Orange FCOJ, Palm Oil)
+• **Preço Goodpack** (por unidade)
+• **Preço concorrente** (por unidade)
+• **Origem** e **Destino**
+• **Frete por container**
+• **Volume total** (MT) e **Lease days**
 
-Pode me dar essas informações de uma vez ou eu te guio passo a passo.`,
+Pode mandar tudo junto, num texto corrido — não precisa ser formatado. O que eu não souber, calculo com benchmark da base e já te aviso o que precisa confirmar com o cliente depois.`,
 }
 
 export default function ChatPage() {
@@ -182,7 +185,7 @@ export default function ChatPage() {
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="Ex: Cliente Nestlé, 800 MT de Palm Oil, concorrente Octabin..."
+            placeholder="Ex: MB6 vs Octabin, Orange FCOJ, $85 GP / $20 concorrente, Santos-Rotterdam, frete $4200/container, 1000 MT, 180 lease days..."
             className="flex-1 px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1a3a5c]/20 focus:border-[#1a3a5c] bg-slate-50"
             disabled={loading}
           />
