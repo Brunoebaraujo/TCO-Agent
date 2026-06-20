@@ -4,6 +4,7 @@ import { Send, Loader2 } from 'lucide-react'
 import TCODashboard from '../components/tco/TCODashboard'
 import PendingPanel from '../components/tco/PendingPanel'
 import ExpressForm from '../components/tco/ExpressForm'
+import { formatOverridesBlock } from '../components/tco/dashboardCalc'
 
 const WELCOME_MESSAGE = {
   role: 'assistant',
@@ -30,16 +31,28 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingSession, setLoadingSession] = useState(Boolean(analysisId))
+  const [overrides, setOverrides] = useState({})
   const bottomRef = useRef(null)
+
+  // key=null sinaliza "limpar tudo" (usado pelo botão Restaurar do dashboard)
+  const handleOverrideChange = useCallback((key, value) => {
+    if (key === null) {
+      setOverrides({})
+      return
+    }
+    setOverrides(prev => ({ ...prev, [key]: value }))
+  }, [])
 
   useEffect(() => {
     if (!analysisId) {
       setMessages([WELCOME_MESSAGE])
       setSessionId(null)
+      setOverrides({})
       return
     }
 
     setLoadingSession(true)
+    setOverrides({})
     fetch(`/api/tco/${analysisId}`)
       .then(res => {
         if (!res.ok) throw new Error('Sessão não encontrada')
@@ -90,6 +103,8 @@ export default function ChatPage() {
     if (!text.trim() || loading) return
 
     const userMessage = { role: 'user', content: text.trim() }
+    const overridesBlock = formatOverridesBlock(overrides)
+    const apiUserMessage = { role: 'user', content: overridesBlock + text.trim() }
     const messagesWithUser = [...messages, userMessage]
     setMessages(messagesWithUser)
     setLoading(true)
@@ -99,7 +114,7 @@ export default function ChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [...messages.slice(1), userMessage],
+          messages: [...messages.slice(1), apiUserMessage],
           opportunity_context: {},
         }),
       })
@@ -121,7 +136,7 @@ export default function ChatPage() {
     } finally {
       setLoading(false)
     }
-  }, [messages, loading, sessionId, persistSession])
+  }, [messages, loading, sessionId, persistSession, overrides])
 
   async function sendMessage(e) {
     e.preventDefault()
@@ -174,7 +189,14 @@ export default function ChatPage() {
                   <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                 </div>
               )}
-              {msg.tco_result && <TCODashboard result={msg.tco_result} sessionId={sessionId} />}
+              {msg.tco_result && (
+                <TCODashboard
+                  result={msg.tco_result}
+                  sessionId={sessionId}
+                  overrides={overrides}
+                  onOverrideChange={handleOverrideChange}
+                />
+              )}
               {msg.pending_text && <PendingPanel text={msg.pending_text} />}
             </div>
           </div>

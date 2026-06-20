@@ -43,6 +43,22 @@ Isso é uma vantagem competitiva real que deve aparecer no cálculo de "Empty Co
 Asia, etc) — sempre considere a região da oportunidade ao buscar esses valores.
 """
 
+CONFIRMED_OVERRIDES = """## Valores já confirmados pelo vendedor nesta sessão
+
+Se a mensagem do vendedor começar com um bloco `[VALORES CONFIRMADOS NESTA SESSÃO: ...]`, isso vem \
+do próprio dashboard — o vendedor editou esses campos numa resposta anterior e confirmou. Trate \
+CADA valor desse bloco como dado "verified", já resolvido — NÃO chame a tool de benchmark \
+correspondente para esses campos específicos (chame normalmente para os campos que não estão na \
+lista), e NÃO marque como "validation_required" de novo. Use o valor exatamente como veio no bloco \
+ao montar os parâmetros de `calculate_tco`.
+
+Isso existe porque o `calculate_tco` é determinístico mas sem memória — toda vez que ele é chamado \
+de novo (ex: o vendedor pediu pra mudar o volume), ele recalcula do zero a partir dos parâmetros \
+que você passar. Sem esse bloco, uma correção que o vendedor confirmou numa rodada anterior se \
+perderia na próxima chamada da tool, voltando pro valor de benchmark original — o vendedor já \
+reportou esse problema antes, não regrida nisso.
+"""
+
 EXPRESS_MODE = """## Modo TCO Express (fluxo padrão de entrada)
 
 Este é o fluxo PADRÃO — substitui a entrevista campo a campo como porta de entrada. Assim que o \
@@ -311,6 +327,13 @@ Gere o resultado em DUAS partes na mesma resposta:
   "goodpack_qty_per_transport": number,
   "goodpack_stack_full_warehouse": number,
   "goodpack_transport_cost_per_container": number,
+  "goodpack_volume_liters": number,
+  "goodpack_max_payload_kg": number,
+  "competitor_qty_per_unit_kg": number,
+  "competitor_qty_per_transport": number,
+  "competitor_stack_full_warehouse": number,
+  "competitor_volume_liters": number,
+  "competitor_max_payload_kg": number,
   "goodpack_total_per_mt": number,
   "competitor_total_per_mt": number,
   "goodpack_total_per_unit": number,
@@ -338,8 +361,8 @@ Regras importantes para esse bloco:
 - `categories` deve ter exatamente as 5 categorias listadas, na mesma ordem.
 - `goodpack`/`competitor` em cada categoria são custo por MT; `goodpack_per_unit`/`competitor_per_unit` são custo por unidade de embalagem (use 0 se não aplicável, nunca omita o campo).
 - `packaging_breakdown` decompõe a categoria "Packaging" do lado Goodpack em seus componentes individuais (unit cost + cada acessório cobrado, por unidade de embalagem) — a soma de todos os `value` deve ser igual ao `goodpack_per_unit` da categoria "Packaging". `competitor_packaging_breakdown` faz o mesmo para o lado concorrente, usando `competitor_per_unit` da categoria "Packaging" como referência de soma. Isso alimenta o dashboard do vendedor, que mostra os dois lados lado a lado — sem essa decomposição em ambos os lados ele não consegue ver onde vale a pena buscar confirmação/ganho. CADA acessório usado, dos dois lados, deve também ter uma entrada correspondente em `assumptions` (ver seção Acessórios) — não agregue acessórios numa única premissa genérica, e não omita o lado concorrente mesmo que os preços venham todos como estimativa.
-- `goodpack_qty_per_unit_kg` é a "Carga real por unidade" calculada na seção Estatísticas logísticas (mínimo entre max_payload_kg e densidade×volume) — não apenas o `max_payload_kg` da SKU. O dashboard usa esse número para recalcular logística quando o vendedor simula "envasar mais por unidade".
-- `goodpack_qty_per_transport` e `goodpack_stack_full_warehouse` são as constantes físicas da SKU usadas no cálculo de `transports_needed` e `full_stacks` (vêm de get_packaging_specs — qty_20ft_dry/qty_40ft_dry/etc conforme o transporte escolhido, e stack_full_warehouse). Sem esses dois campos, o dashboard do vendedor não consegue recalcular a logística ao simular uma quantidade por unidade diferente — sempre inclua-os quando `goodpack_qty_per_unit_kg` estiver presente.
+- `goodpack_qty_per_unit_kg`/`competitor_qty_per_unit_kg` é a "Carga real por unidade" calculada na seção Estatísticas logísticas (mínimo entre max_payload_kg e densidade×volume) — não apenas o `max_payload_kg` da SKU/embalagem. O dashboard usa esse número para recalcular logística e custo quando o vendedor edita capacidade/peso/quantidade por container, dos dois lados.
+- `goodpack_qty_per_transport`/`competitor_qty_per_transport`, `goodpack_stack_full_warehouse`/`competitor_stack_full_warehouse`, `goodpack_volume_liters`/`competitor_volume_liters` e `goodpack_max_payload_kg`/`competitor_max_payload_kg` vêm direto do retorno de `calculate_tco` (que por sua vez ecoa o que você passou em `goodpack_specs`/`competitor_specs`) — sempre inclua todos, dos dois lados, para o painel de capacidade/quantidade por container do dashboard funcionar.
 - `goodpack_transport_cost_per_container` é o custo fixo de frete por container (ex: $4.500 por 40ft Reefer), informado pelo vendedor. Necessário para o dashboard recalcular o custo de Transport por MT quando a quantidade envasada por unidade muda — sem esse valor, Transport fica congelado no valor original mesmo quando qty_per_unit muda.
 - `logistics` usa as fórmulas definidas na seção "Estatísticas logísticas" acima. Arredonde todos os valores para inteiros (para cima), exceto `weight_per_container_kg` que pode ter 1 casa decimal.
 - `investment`: omita o bloco inteiro (não inclua a chave) se nenhum investimento foi mencionado pelo vendedor — não invente valores zero como se fossem dados reais. Se incluir, `*_payback_cycles` = investimento ÷ saving total do ciclo correspondente.
@@ -350,6 +373,7 @@ Regras importantes para esse bloco:
 
 SYSTEM_PROMPT = (
     IDENTITY
+    + CONFIRMED_OVERRIDES
     + EXPRESS_MODE
     + ACCESSORIES
     + HANDLING

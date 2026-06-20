@@ -78,23 +78,46 @@ export function matchAssumption(itemLabel, assumptions = []) {
  * @param {number} transportCostPerContainer
  * @returns {Object} mapa label → { perMt }
  */
-export function recalcCategoriesByQty(categories, newQtyKg, origQtyKg, qtyPerTransport, transportCostPerContainer) {
+/**
+ * Carga real por unidade (kg) = MÍNIMO entre peso nominal e densidade×volume.
+ * Mesma lógica do backend (app/calculator/engine.py) — produto de baixa
+ * densidade enche o volume antes de bater no peso nominal.
+ */
+export function computeQtyRealPerUnitKg(maxPayloadKg, densityKgPerLiter, volumeLiters) {
+  const candidates = []
+  if (maxPayloadKg != null) candidates.push(Number(maxPayloadKg))
+  if (densityKgPerLiter != null && volumeLiters != null) candidates.push(Number(densityKgPerLiter) * Number(volumeLiters))
+  return candidates.length ? Math.min(...candidates) : null
+}
+
+/**
+ * Recalcula $/MT de todas as categorias de UM lado (goodpack ou competitor)
+ * quando a qty real por unidade daquele lado muda (por edição direta de
+ * "Quantidade envasada", ou por edição de Volume/Peso nominal que altera a
+ * qty real calculada).
+ *
+ * @param {Array} categories
+ * @param {'goodpack'|'competitor'} side
+ * @param {number} newQtyKg
+ * @param {number} origQtyKg
+ * @param {number} qtyPerTransport
+ * @param {number} transportCostPerContainer
+ */
+export function recalcCategoriesByQty(categories, side, newQtyKg, origQtyKg, qtyPerTransport, transportCostPerContainer) {
   const ratio = (origQtyKg && newQtyKg) ? origQtyKg / newQtyKg : 1
   const result = {}
 
   for (const cat of categories) {
+    const original = cat[side]
     if (cat.label === 'Transport') {
       if (transportCostPerContainer && qtyPerTransport && newQtyKg) {
         const liquidMtPerContainer = (newQtyKg / 1000) * qtyPerTransport
         result[cat.label] = { perMt: transportCostPerContainer / liquidMtPerContainer }
       } else {
-        // Sem custo por container: usa a mesma proporção das demais categorias
-        result[cat.label] = { perMt: cat.goodpack * ratio }
+        result[cat.label] = { perMt: original * ratio }
       }
     } else {
-      // Packaging, Handling, Empty: custo per_unit fixo ÷ nova qty em MT
-      // Usamos proporção sobre o $/MT original para manter consistência
-      result[cat.label] = { perMt: cat.goodpack * ratio }
+      result[cat.label] = { perMt: original * ratio }
     }
   }
 
@@ -102,7 +125,8 @@ export function recalcCategoriesByQty(categories, newQtyKg, origQtyKg, qtyPerTra
 }
 
 /**
- * Recalcula estatísticas logísticas Goodpack.
+ * Recalcula estatísticas logísticas de um lado (goodpack ou competitor) —
+ * função genérica, mesma fórmula para os dois.
  *
  * @param {number} simulatedMt
  * @param {number} qtyPerUnitKg
@@ -121,16 +145,16 @@ export function recalcLogistics(simulatedMt, qtyPerUnitKg, qtyPerTransport, stac
 
 /**
  * Combina os custos recalculados (categorias com override de preço +
- * demais por qty) e calcula os totais finais.
+ * demais por qty, dos dois lados) e calcula os totais finais.
  *
  * @param {object} result - TCO_RESULT original
- * @param {Object} categoryOverrides - mapa label → { perMt } para categorias com preço editado
- *   (ex: { Packaging: {perMt}, 'Handling packer': {perMt} }) — aceita também o formato antigo
- *   (number) para manter compatibilidade com chamadas existentes que passavam só o Packaging.
- * @param {Object|null} recalcedByQty - mapa de categorias recalculadas por qty, ou null
- * @returns {{ goodpackTotalPerMt, totalSaving, savingPercentage, categoriesRecalced }}
+ * @param {Object} categoryOverrides - mapa label → { perMt, competitorPerMt } para categorias com preço editado
+ *   (aceita também o formato antigo (number) para manter compatibilidade com chamada passando só Packaging)
+ * @param {Object|null} recalcedByQtyGoodpack - mapa de categorias recalculadas por qty, lado Goodpack
+ * @param {Object|null} recalcedByQtyCompetitor - mesmo, lado concorrente
+ * @returns {{ goodpackTotalPerMt, competitorTotalPerMt, totalSaving, savingPercentage, categoriesRecalced }}
  */
-export function recalcTotals(result, categoryOverrides, recalcedByQty) {
+export function recalcTotals(result, categoryOverrides, recalcedByQtyGoodpack, recalcedByQtyCompetitor) {
   const categories = result.categories || []
 
   // Compatibilidade: chamadas antigas passavam newPackagingPerMt (number) direto.
@@ -140,18 +164,19 @@ export function recalcTotals(result, categoryOverrides, recalcedByQty) {
 
   const categoriesRecalced = categories.map(cat => {
     const override = overrides[cat.label]
-    const rc = recalcedByQty?.[cat.label]
+    const rcGp = recalcedByQtyGoodpack?.[cat.label]
+    const rcComp = recalcedByQtyCompetitor?.[cat.label]
     return {
       ...cat,
-      goodpack: override?.perMt ?? rc?.perMt ?? cat.goodpack,
-      competitor: override?.competitorPerMt ?? cat.competitor,
+      goodpack: override?.perMt ?? rcGp?.perMt ?? cat.goodpack,
+      competitor: override?.competitorPerMt ?? rcComp?.perMt ?? cat.competitor,
     }
   })
 
   const goodpackTotalPerMt = categoriesRecalced.reduce(
     (sum, c) => sum + (Number(c.goodpack) || 0), 0
   )
-  const hasCompetitorOverride = Object.values(overrides).some(o => o?.competitorPerMt != null)
+  const hasCompetitorOverride = Object.values(overrides).some(o => o?.competitorPerMt != null) || !!recalcedByQtyCompetitor
   const competitorTotalPerMt = hasCompetitorOverride
     ? categoriesRecalced.reduce((sum, c) => sum + (Number(c.competitor) || 0), 0)
     : (result.competitor_total_per_mt || 0)
@@ -161,4 +186,39 @@ export function recalcTotals(result, categoryOverrides, recalcedByQty) {
   const savingPercentage = competitorTotalPerMt > 0 ? (savingPerMt / competitorTotalPerMt) * 100 : 0
 
   return { goodpackTotalPerMt, competitorTotalPerMt, totalSaving, savingPercentage, categoriesRecalced }
+}
+
+const OVERRIDE_LABELS = {
+  qtyPerUnit: 'Quantidade envasada Goodpack (kg/unidade)',
+  handlingPackerPerUnit: 'Handling packer Goodpack (por unidade)',
+  handlingEnduserPerUnit: 'Handling enduser Goodpack (por unidade)',
+  goodpackVolumeLiters: 'Volume Goodpack (L)',
+  goodpackMaxPayloadKg: 'Peso nominal Goodpack (kg)',
+  goodpackQtyPerTransport: 'Quantidade Goodpack por container',
+  competitorVolumeLiters: 'Volume concorrente (L)',
+  competitorMaxPayloadKg: 'Peso nominal concorrente (kg)',
+  competitorQtyPerTransport: 'Quantidade concorrente por container',
+}
+
+/**
+ * Formata o mapa de overrides confirmados pelo vendedor (editados no
+ * dashboard) num bloco de texto que vai colado na próxima mensagem enviada
+ * ao agente — ver seção CONFIRMED_OVERRIDES do system prompt. Sem isso, uma
+ * correção feita no dashboard se perderia na próxima vez que o agente
+ * chamasse calculate_tco (a tool não tem memória própria).
+ *
+ * @param {Object} overrides - mapa { key: value }
+ * @returns {string} bloco formatado, ou string vazia se não houver overrides
+ */
+export function formatOverridesBlock(overrides) {
+  const entries = Object.entries(overrides || {}).filter(([, v]) => v != null)
+  if (entries.length === 0) return ''
+
+  const lines = entries.map(([key, value]) => {
+    if (key.startsWith('breakdown:')) return `- Acessório/Item "${key.slice(10)}" (Goodpack): ${value}`
+    if (key.startsWith('compBreakdown:')) return `- Acessório/Item "${key.slice(14)}" (Concorrente): ${value}`
+    return `- ${OVERRIDE_LABELS[key] || key}: ${value}`
+  })
+
+  return `[VALORES CONFIRMADOS NESTA SESSÃO — use estes em vez de buscar benchmark para estes campos específicos:\n${lines.join('\n')}]\n\n`
 }
