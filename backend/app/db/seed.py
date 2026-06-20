@@ -211,7 +211,7 @@ PRODUCT_HIERARCHY = {
 
 ACCESSORY_TYPES = [
     "Pallet", "Poly Liner", "Base Pad", "Aseptic Bag",
-    "Strapping Cost", "Lid", "Dunnage", "Top Sheet", "FIBC",
+    "Strapping Cost", "Lid", "Dunnage", "Top Sheet", "FIBC", "Liquid Liner",
 ]
 
 REGIONS = [
@@ -225,18 +225,65 @@ REGIONS = [
 
 # Estrutura de acessórios: (packaging_type, sku_or_unit_name, (produto, tipo)|None, [acessórios])
 # (produto, tipo) = None significa default genérico, válido para qualquer produto/tipo.
+#
+# Listas de MB5/MB6/Conical Drum/Cylindrical Drum/Wooden Bin expandidas em
+# 20/06/2026 a partir do uso real observado em 107 TCOs históricos extraídos
+# (Poly Liner, Lid, Top Sheet, Dunnage e Liquid Liner apareciam de fato nesses
+# negócios mas não estavam cadastrados como vínculo — só os preços estavam
+# faltando, a estrutura em si também estava incompleta).
 PACKAGING_ACCESSORY_RULES = [
     ("goodpack", "MB3", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
     ("goodpack", "MB4", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
-    ("goodpack", "MB5", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
+    ("goodpack", "MB5", None, ["Aseptic Bag", "Base Pad", "Strapping Cost", "Poly Liner", "Dunnage", "Lid", "Top Sheet"]),
     ("goodpack", "MB5H", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
-    ("goodpack", "MB6", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
+    ("goodpack", "MB6", None, ["Aseptic Bag", "Base Pad", "Strapping Cost", "Poly Liner", "Lid", "Top Sheet", "Liquid Liner"]),
     ("goodpack", "MB12", None, ["Aseptic Bag", "Base Pad", "Strapping Cost"]),
     ("goodpack", "MB6", ("Orange", "FCOJ"), ["Poly Liner"]),
     ("goodpack", "MB6", ("Orange", "NFC"), ["Aseptic Bag"]),
     ("competitor", "Drum 200L", None, ["Poly Liner", "Aseptic Bag", "Strapping Cost"]),
     ("competitor", "Octabin", None, ["Pallet", "Poly Liner", "Aseptic Bag", "Strapping Cost", "Dunnage"]),
+    ("competitor", "Conical Drum", None, ["Poly Liner", "Pallet", "Strapping Cost", "Aseptic Bag"]),
+    ("competitor", "Cylindrical Drum", None, ["Poly Liner", "Pallet", "Strapping Cost", "Aseptic Bag"]),
+    ("competitor", "Wooden Bin", None, ["Poly Liner"]),
 ]
+
+# Preço de referência (mediana, USD) por (packaging_type, sku_or_unit_name,
+# accessory_name), derivado de 107 TCOs históricos reais extraídos das
+# planilhas legadas (20/06/2026) — só inclui combinações com >= 5 registros
+# para evitar virar "benchmark" a partir de 1-2 negócios isolados. Aplica-se
+# apenas às linhas de acessório SEM produto+tipo específico (genéricas) —
+# overrides por produto+tipo continuam sem preço default por design (mais
+# variáveis ainda, devem ser perguntados).
+# valor: (mediana_usd, contagem_amostras)
+ACCESSORY_PRICE_BENCHMARKS = {
+    ("goodpack", "MB5", "Aseptic Bag"): (23.00, 21),
+    ("goodpack", "MB5", "Poly Liner"): (3.00, 20),
+    ("goodpack", "MB5", "Base Pad"): (2.42, 16),
+    ("goodpack", "MB5", "Dunnage"): (9.40, 15),
+    ("goodpack", "MB5", "Strapping Cost"): (1.00, 15),
+    ("goodpack", "MB5", "Lid"): (2.95, 12),
+    ("goodpack", "MB5", "Top Sheet"): (2.00, 9),
+    ("goodpack", "MB6", "Poly Liner"): (3.90, 65),
+    ("goodpack", "MB6", "Base Pad"): (2.63, 41),
+    ("goodpack", "MB6", "Strapping Cost"): (0.50, 39),
+    ("goodpack", "MB6", "Lid"): (1.50, 31),
+    ("goodpack", "MB6", "Aseptic Bag"): (15.00, 17),
+    ("goodpack", "MB6", "Top Sheet"): (4.00, 9),
+    ("goodpack", "MB6", "Liquid Liner"): (35.00, 5),
+    ("competitor", "Conical Drum", "Poly Liner"): (0.50, 21),
+    ("competitor", "Conical Drum", "Pallet"): (10.75, 18),
+    ("competitor", "Conical Drum", "Strapping Cost"): (0.50, 18),
+    ("competitor", "Conical Drum", "Aseptic Bag"): (4.00, 13),
+    ("competitor", "Cylindrical Drum", "Poly Liner"): (0.75, 49),
+    ("competitor", "Cylindrical Drum", "Pallet"): (10.00, 23),
+    ("competitor", "Cylindrical Drum", "Strapping Cost"): (0.50, 22),
+    ("competitor", "Cylindrical Drum", "Aseptic Bag"): (4.19, 14),
+    ("competitor", "Octabin", "Pallet"): (12.00, 11),
+    ("competitor", "Octabin", "Aseptic Bag"): (16.50, 8),
+    ("competitor", "Octabin", "Strapping Cost"): (1.50, 8),
+    ("competitor", "Octabin", "Poly Liner"): (3.00, 7),
+    ("competitor", "Wooden Bin", "Poly Liner"): (3.55, 5),
+}
 
 
 TRANSPORT_TYPES = [
@@ -470,10 +517,10 @@ async def seed_initial_data(db: AsyncSession) -> None:
         product_name = all_products[t.product_id].product_name
         type_lookup[(product_name, t.type_name)] = t.id
 
-    existing_combinations = set(
-        (pa.packaging_type, pa.goodpack_sku_id, pa.competitor_unit_id, pa.product_type_id, pa.accessory_type_id)
+    existing_pa_by_combo = {
+        (pa.packaging_type, pa.goodpack_sku_id, pa.competitor_unit_id, pa.product_type_id, pa.accessory_type_id): pa
         for pa in (await db.execute(select(PackagingAccessory))).scalars().all()
-    )
+    }
 
     for packaging_type, name, product_type_key, accessories in PACKAGING_ACCESSORY_RULES:
         goodpack_sku_id = skus_by_code.get(name) if packaging_type == "goodpack" else None
@@ -486,18 +533,42 @@ async def seed_initial_data(db: AsyncSession) -> None:
                 continue
 
             combo = (packaging_type, goodpack_sku_id, competitor_unit_id, product_type_id, accessory_type_id)
-            if combo in existing_combinations:
-                continue  # já existe exatamente esta combinação — não duplica
 
-            db.add(PackagingAccessory(
+            # Preço de referência só se aplica a linhas genéricas (sem produto+tipo
+            # específico) — overrides por produto+tipo continuam sem default por design.
+            benchmark = None if product_type_key else ACCESSORY_PRICE_BENCHMARKS.get((packaging_type, name, accessory_name))
+
+            if combo in existing_pa_by_combo:
+                if benchmark:
+                    row = existing_pa_by_combo[combo]
+                    price, count = benchmark
+                    row.default_unit_price = price
+                    row.currency = "USD"
+                    row.confidence_level = "high_confidence"
+                    row.source_detail = f"Mediana de {count} TCOs históricos reais (extração 20/06/2026, apenas registros em USD)"
+                continue  # combinação já existia — preço atualizado acima se havia benchmark, resto não se mexe
+
+            kwargs = dict(
                 packaging_type=packaging_type,
                 goodpack_sku_id=goodpack_sku_id,
                 competitor_unit_id=competitor_unit_id,
                 product_type_id=product_type_id,
                 accessory_type_id=accessory_type_id,
-                confidence_level="validation_required",
-                source_type="interno",
-                source_detail="Estrutura inicial — preço pendente de confirmação",
                 collected_at=date.today(),
-            ))
+            )
+            if benchmark:
+                price, count = benchmark
+                kwargs.update(
+                    default_unit_price=price,
+                    currency="USD",
+                    confidence_level="high_confidence",
+                    source_detail=f"Mediana de {count} TCOs históricos reais (extração 20/06/2026, apenas registros em USD)",
+                )
+            else:
+                kwargs.update(
+                    confidence_level="validation_required",
+                    source_type="interno",
+                    source_detail="Estrutura inicial — preço pendente de confirmação",
+                )
+            db.add(PackagingAccessory(**kwargs))
     await db.flush()
