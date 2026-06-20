@@ -3,6 +3,7 @@ Tools (function calling) que o agente TCO pode usar para consultar dados
 reais da base de conhecimento — specs de embalagens, acessórios, preços —
 em vez de inferir ou inventar esses valores a partir do texto da conversa.
 """
+from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
@@ -235,6 +236,37 @@ TOOLS = [
                 "goodpack_accessories", "competitor_accessories", "handling_benchmarks",
                 "transport_cost_per_container", "simulated_metric_tonnes",
             ],
+        },
+    },
+    {
+        "name": "update_knowledge_base",
+        "description": (
+            "Atualiza PERMANENTEMENTE um valor de referência na base (preço de acessório ou spec "
+            "física de embalagem), a partir de uma correção que o vendedor confirmou nesta sessão. "
+            "SÓ chame depois de o vendedor responder afirmativamente à sua pergunta de oferta "
+            "(ex: 'Atualizar a base do Poly Liner para $2,50?') — NUNCA chame proativamente sem "
+            "essa confirmação explícita, mesmo que o valor já esteja no bloco de overrides "
+            "confirmados. Isso muda o default que TODAS as futuras análises vão usar, não só esta."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "field_type": {
+                    "type": "string",
+                    "enum": ["accessory_price", "packaging_spec"],
+                    "description": "accessory_price = preço de acessório; packaging_spec = volume/peso/qty por container da embalagem",
+                },
+                "packaging_type": {"type": "string", "enum": ["goodpack", "competitor"]},
+                "name": {"type": "string", "description": "SKU Goodpack (ex: 'MB6') ou nome da embalagem concorrente (ex: 'Octabin')"},
+                "accessory_name": {"type": "string", "description": "Obrigatório se field_type=accessory_price (ex: 'Poly Liner')"},
+                "spec_field": {
+                    "type": "string",
+                    "enum": ["volume_liters", "max_payload_kg", "tare_weight_kg", "qty_20ft_dry", "qty_40ft_dry", "qty_20ft_reefer", "qty_40ft_reefer"],
+                    "description": "Obrigatório se field_type=packaging_spec — escolha conforme o tipo de transporte usado na análise (ex: transporte '40ft Reefer' → qty_40ft_reefer)",
+                },
+                "new_value": {"type": "number", "description": "Valor confirmado pelo vendedor"},
+            },
+            "required": ["field_type", "packaging_type", "name", "new_value"],
         },
     },
 ]
@@ -487,5 +519,60 @@ async def execute_tool(db: AsyncSession, tool_name: str, tool_input: dict) -> di
             return result
         except Exception as e:
             return {"error": f"Falha ao calcular: {e}. Confira se todos os campos obrigatórios foram passados."}
+
+    elif tool_name == "update_knowledge_base":
+        packaging_type = tool_input["packaging_type"]
+        name = tool_input["name"]
+        new_value = tool_input["new_value"]
+        obj = await _resolve_packaging_id(db, packaging_type, name)
+        if not obj:
+            return {"error": f"Embalagem '{name}' não encontrada na base — nada foi atualizado."}
+
+        if tool_input["field_type"] == "accessory_price":
+            accessory_name = tool_input.get("accessory_name")
+            if not accessory_name:
+                return {"error": "accessory_name é obrigatório para field_type=accessory_price."}
+            acc_type = (await db.execute(
+                select(AccessoryType).where(AccessoryType.accessory_name == accessory_name)
+            )).scalar_one_or_none()
+            if not acc_type:
+                return {"error": f"Acessório '{accessory_name}' não cadastrado em accessory_types — nada foi atualizado."}
+
+            query = select(PackagingAccessory).where(
+                PackagingAccessory.accessory_type_id == acc_type.id,
+                PackagingAccessory.product_type_id.is_(None),
+                PackagingAccessory.is_current == True,
+            )
+            query = query.where(
+                PackagingAccessory.goodpack_sku_id == obj.id if packaging_type == "goodpack"
+                else PackagingAccessory.competitor_unit_id == obj.id
+            )
+            row = (await db.execute(query)).scalar_one_or_none()
+            if not row:
+                return {"error": f"Vínculo '{accessory_name}' x '{name}' não encontrado — não dá pra atualizar um vínculo que não existe (precisa ser cadastrado primeiro)."}
+
+            old_value = float(row.default_unit_price) if row.default_unit_price else None
+            row.default_unit_price = new_value
+            row.currency = "USD"
+            row.confidence_level = "verified"
+            row.source_type = "vendedor"
+            row.source_detail = f"Confirmado pelo vendedor via chat em {date.today().isoformat()}"
+            row.collected_at = date.today()
+            await db.commit()
+            return {"updated": True, "field": f"{accessory_name} ({packaging_type}/{name})", "old_value": old_value, "new_value": new_value}
+
+        elif tool_input["field_type"] == "packaging_spec":
+            spec_field = tool_input.get("spec_field")
+            allowed_fields = {"volume_liters", "max_payload_kg", "tare_weight_kg", "qty_20ft_dry", "qty_40ft_dry", "qty_20ft_reefer", "qty_40ft_reefer"}
+            if spec_field not in allowed_fields:
+                return {"error": f"spec_field inválido ou ausente — precisa ser um de: {sorted(allowed_fields)}"}
+
+            old_value = getattr(obj, spec_field, None)
+            old_value = float(old_value) if old_value is not None else None
+            setattr(obj, spec_field, new_value)
+            await db.commit()
+            return {"updated": True, "field": f"{spec_field} ({packaging_type}/{name})", "old_value": old_value, "new_value": new_value}
+
+        return {"error": "field_type precisa ser 'accessory_price' ou 'packaging_spec'."}
 
     return {"error": f"Tool desconhecida: {tool_name}"}
