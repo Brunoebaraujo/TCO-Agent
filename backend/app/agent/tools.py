@@ -11,6 +11,7 @@ from app.db.models import (
     TransportType, HandlingParameterType, HandlingBenchmark,
     CustomerCompetitorPrice,
 )
+from app.calculator.engine import calculate_tco as _calculate_tco
 
 TOOLS = [
     {
@@ -161,6 +162,79 @@ TOOLS = [
                 "type_name": {"type": "string", "description": "Tipo de processamento, se conhecido (ex: 'FCOJ', 'Paste'). Omitir para ver todos os tipos cadastrados do produto."},
             },
             "required": ["product_name"],
+        },
+    },
+    {
+        "name": "calculate_tco",
+        "description": (
+            "Calcula o TCO completo de forma determinística (Python, não você) — categorias, "
+            "breakdown de packaging dos dois lados, logística (units/transports/stacks/peso), "
+            "totais e payback. SEMPRE use esta tool para gerar os números do TCO_RESULT — "
+            "NUNCA calcule Handling, Logistics ou totais de cabeça, mesmo que pareça simples. "
+            "Você só decide quais valores entram em cada campo (benchmark vs. informado pelo "
+            "vendedor); a conta em si é feita aqui. Chame depois de já ter "
+            "get_packaging_specs (dois lados), get_product_density, get_packaging_accessories "
+            "(dois lados) e get_handling_benchmarks."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goodpack_specs": {
+                    "type": "object",
+                    "description": "Retorno de get_packaging_specs para o lado Goodpack (passe o objeto inteiro)",
+                    "properties": {
+                        "volume_liters": {"type": ["number", "null"]},
+                        "max_payload_kg": {"type": ["number", "null"]},
+                        "tare_weight_kg": {"type": ["number", "null"]},
+                        "stack_full_warehouse": {"type": ["integer", "null"]},
+                    },
+                },
+                "competitor_specs": {
+                    "type": "object",
+                    "description": "Retorno de get_packaging_specs para o lado concorrente",
+                    "properties": {
+                        "volume_liters": {"type": ["number", "null"]},
+                        "max_payload_kg": {"type": ["number", "null"]},
+                        "tare_weight_kg": {"type": ["number", "null"]},
+                        "stack_full_warehouse": {"type": ["integer", "null"]},
+                    },
+                },
+                "density_kg_per_liter": {"type": ["number", "null"], "description": "De get_product_density"},
+                "goodpack_unit_cost": {"type": "number", "description": "Preço Goodpack informado pelo vendedor, por unidade"},
+                "competitor_unit_cost": {"type": "number", "description": "Preço concorrente informado pelo vendedor, por unidade"},
+                "goodpack_accessories": {
+                    "type": "array",
+                    "description": "Acessórios do lado Goodpack: [{label, value}]. value=null se não cadastrado (tratado como 0).",
+                    "items": {"type": "object", "properties": {"label": {"type": "string"}, "value": {"type": ["number", "null"]}}},
+                },
+                "competitor_accessories": {
+                    "type": "array",
+                    "description": "Mesma estrutura, lado concorrente",
+                    "items": {"type": "object", "properties": {"label": {"type": "string"}, "value": {"type": ["number", "null"]}}},
+                },
+                "handling_benchmarks": {
+                    "type": "object",
+                    "description": (
+                        "Dict {param_key: value} com TODOS os parâmetros packer_* e enduser_* "
+                        "retornados por get_handling_benchmarks (substitua pelo valor informado "
+                        "pelo vendedor quando ele tiver dado um real). Mesmos valores se aplicam "
+                        "aos dois lados — o benchmark não varia por embalagem, só a qty/stack física varia."
+                    ),
+                },
+                "transport_cost_per_container": {"type": "number", "description": "Frete por container, informado pelo vendedor"},
+                "transport_qty_per_container_goodpack": {"type": ["integer", "null"], "description": "qty_20ft_dry/qty_40ft_dry/etc. da SKU Goodpack, conforme o tipo de transporte"},
+                "transport_qty_per_container_competitor": {"type": ["integer", "null"], "description": "Mesmo campo, embalagem concorrente"},
+                "simulated_metric_tonnes": {"type": "number", "description": "Volume total da oportunidade, em MT"},
+                "goodpack_empty_mgmt_per_mt": {"type": "number", "description": "Custo de gestão de container vazio por MT, lado Goodpack — normalmente 0 (Goodpack recolhe sem custo ao cliente)"},
+                "competitor_empty_mgmt_per_mt": {"type": "number", "description": "Mesmo campo, lado concorrente — normalmente 0 a menos que o vendedor informe um custo de descarte/retorno"},
+                "investment_goodpack": {"type": ["number", "null"], "description": "Só inclua se o vendedor mencionou investimento de adaptação — não invente 0"},
+                "investment_competitor": {"type": ["number", "null"]},
+            },
+            "required": [
+                "goodpack_specs", "competitor_specs", "goodpack_unit_cost", "competitor_unit_cost",
+                "goodpack_accessories", "competitor_accessories", "handling_benchmarks",
+                "transport_cost_per_container", "simulated_metric_tonnes",
+            ],
         },
     },
 ]
@@ -388,5 +462,30 @@ async def execute_tool(db: AsyncSession, tool_name: str, tool_input: dict) -> di
                 "ser confirmada com o cliente — nunca apresente como dado verificado."
             ),
         }
+
+    elif tool_name == "calculate_tco":
+        try:
+            result = _calculate_tco(
+                goodpack_specs=tool_input["goodpack_specs"],
+                competitor_specs=tool_input["competitor_specs"],
+                density_kg_per_liter=tool_input.get("density_kg_per_liter"),
+                goodpack_unit_cost=tool_input["goodpack_unit_cost"],
+                competitor_unit_cost=tool_input["competitor_unit_cost"],
+                goodpack_accessories=tool_input["goodpack_accessories"],
+                competitor_accessories=tool_input["competitor_accessories"],
+                handling_benchmarks=tool_input["handling_benchmarks"],
+                transport_cost_per_container=tool_input["transport_cost_per_container"],
+                transport_qty_per_container_goodpack=tool_input.get("transport_qty_per_container_goodpack"),
+                transport_qty_per_container_competitor=tool_input.get("transport_qty_per_container_competitor"),
+                simulated_metric_tonnes=tool_input["simulated_metric_tonnes"],
+                goodpack_empty_mgmt_per_mt=tool_input.get("goodpack_empty_mgmt_per_mt", 0.0),
+                competitor_empty_mgmt_per_mt=tool_input.get("competitor_empty_mgmt_per_mt", 0.0),
+                investment_goodpack=tool_input.get("investment_goodpack"),
+                investment_competitor=tool_input.get("investment_competitor"),
+            )
+            result["_note"] = "Calculado deterministicamente — use estes valores diretamente no TCO_RESULT, sem refazer a conta."
+            return result
+        except Exception as e:
+            return {"error": f"Falha ao calcular: {e}. Confira se todos os campos obrigatórios foram passados."}
 
     return {"error": f"Tool desconhecida: {tool_name}"}

@@ -69,6 +69,10 @@ diferentes), pergunte qual tipo antes de prosseguir.
 disponível.
 - Chame `get_handling_benchmarks` (role="both"), usando a região da oportunidade se já souber \
 (senão GLOBAL).
+- Com tudo isso em mãos, chame `calculate_tco` — ela faz toda a matemática (Packaging, Handling, \
+Transport, Logistics, payback) de forma determinística. NUNCA calcule esses números você mesmo, \
+mesmo que pareça simples; use o que a tool retornar diretamente nos campos correspondentes do \
+TCO_RESULT (ver seção TCO_RESULT_SCHEMA).
 - Considere ciclo único dentro da temporada (lease days = duração do aluguel naquela safra) — não \
 tente estimar quantos giros cabem no período. Se o vendedor mencionar contrato plurianual, o \
 payback pode assumir renovação nas mesmas condições a cada temporada — sinalize essa premissa \
@@ -102,13 +106,14 @@ NUNCA deve calcular o custo de "Packaging" assumindo que não há acessórios �
 o custo real.
 
 **No modo TCO Express:** use o resultado de `get_packaging_accessories` como ponto de partida — \
-inclua cada acessório retornado no `packaging_breakdown` (lado Goodpack) ou `competitor_packaging_breakdown` \
-(lado concorrente), conforme o lado que a chamada de tool consultou, com o `default_unit_price` da \
-tool, e adicione uma entrada em `assumptions` para CADA acessório individualmente (label = nome do \
-acessório + lado, ex: "Acessório Dunnage (Goodpack)", "Acessório Poly Liner (Concorrente)"), com o \
-confidence_level que a tool retornou. Preço de acessório e até a lista de quais acessórios o cliente \
-realmente usa variam por negociação — isso é justamente o tipo de premissa que deve ficar marcada \
-como pendente de confirmação, não um bloqueio para gerar o resultado.
+monte a lista `goodpack_accessories`/`competitor_accessories` (cada item `{label, value}`, usando \
+o `default_unit_price` da tool) e passe para `calculate_tco` — ela monta o `packaging_breakdown` e \
+`competitor_packaging_breakdown` automaticamente a partir disso, você não monta esses arrays na mão. \
+Além disso, adicione uma entrada em `assumptions` para CADA acessório individualmente (label = nome \
+do acessório + lado, ex: "Acessório Dunnage (Goodpack)", "Acessório Poly Liner (Concorrente)"), com \
+o confidence_level que a tool retornou. Preço de acessório e até a lista de quais acessórios o \
+cliente realmente usa variam por negociação — isso é justamente o tipo de premissa que deve ficar \
+marcada como pendente de confirmação, não um bloqueio para gerar o resultado.
 
 **Se `get_packaging_accessories` não retornar nada** para a combinação embalagem+produto+tipo (sem \
 default genérico nem específico cadastrado — comum em Chemical/Components, ou embalagem nova) — \
@@ -135,38 +140,22 @@ o confidence_level que a tool retornou.
 5. Some unit cost + acessórios + scrapping/rebate para chegar no "Packaging" total por uso/MT.
 """
 
-HANDLING = """## Handling (Packer e Enduser) — cálculo detalhado por etapa
+HANDLING = """## Handling (Packer e Enduser)
 
-O custo de Handling NÃO é um valor único — é resultado de várias etapas operacionais, cada uma \
-com sua própria fórmula de mão de obra × tempo × custo/hora. As etapas são fixas e universais \
-(não variam por embalagem ou produto), mas os VALORES (manpower, tempo, custo/hora) variam por \
-embalagem, por região, e podem ser informados pelo vendedor (substituindo o benchmark default).
+O custo de Handling é resultado de várias etapas operacionais (storage, assembly/disassembly, \
+stacking, loading/unloading), cada uma com sua própria fórmula de mão de obra × tempo × custo/hora. \
+Você NÃO calcula isso de cabeça — a tool `calculate_tco` faz a conta a partir dos parâmetros que \
+você fornece em `handling_benchmarks`.
 
-Use a ferramenta get_handling_benchmarks para obter a lista completa de parâmetros e seus valores \
-default antes de calcular — nunca invente manpower, tempo ou custo/hora de memória.
+Use `get_handling_benchmarks` para obter a lista completa de parâmetros e seus valores default \
+antes de chamar `calculate_tco` — nunca invente manpower, tempo ou custo/hora de memória, e nunca \
+monte o dict `handling_benchmarks` com valores que não vieram dessa tool ou do vendedor.
 
-**Etapas do Packer:**
-- Storage: (storage_cost_per_month_stack × storage_time_months) ÷ stack_full_warehouse — custo de \
-armazenagem rateado pela capacidade de empilhamento.
-- Assembly: (manpower × labor_cost_per_hour) ÷ assembly_units_per_hour — custo de montagem por \
-unidade.
-- Stacking: (manpower × labor_cost_per_hour × stacking_time_minutes ÷ 60) — custo de empilhamento.
-- Loading: (manpower × labor_cost_per_hour × loading_time_minutes ÷ 60) — custo de carregamento no \
-transporte.
-- Handling Packer total por unidade = soma das 4 etapas acima.
-
-**Etapas do Enduser:**
-- Storage: mesma lógica do packer, com os parâmetros enduser_storage_*.
-- Disassembly: (manpower × labor_cost_per_hour) ÷ disassembly_units_per_hour.
-- Remove Trash: (manpower × labor_cost_per_hour × remove_trash_minutes ÷ 60).
-- Stacking (full units): (manpower × labor_cost_per_hour × stacking_full_minutes ÷ 60).
-- Stacking (empty units): (manpower × labor_cost_per_hour × stacking_empty_minutes ÷ 60).
-- Unloading: (manpower × labor_cost_per_hour × unloading_minutes ÷ 60).
-- Handling Enduser total por unidade = soma das 6 etapas acima.
-
-Para cada parâmetro: se o vendedor informar o valor real do cliente, use-o e marque "verified". Se \
-não informar, use o default de get_handling_benchmarks e marque "validation_required" (ou \
-"high_confidence" se o benchmark tiver menos de 6 meses e fonte registrada).
+Para cada parâmetro: se o vendedor informar o valor real do cliente, use-o no lugar do default ao \
+montar `handling_benchmarks`, e marque esse parâmetro como "verified" em `assumptions`. Se não \
+informar, use o default retornado por `get_handling_benchmarks` e marque "validation_required" (ou \
+"high_confidence" se o benchmark tiver menos de 6 meses e fonte registrada — confira o \
+confidence_level que a tool já retorna).
 """
 
 TRANSPORT = """## Transporte
@@ -176,17 +165,17 @@ comum o cliente usar transportes diferentes para cada embalagem. Pergunte ao ven
 de transporte (ex: "20ft Dry", "40ft Reefer") se ele não informar; no modo express, se não \
 informado, assuma "40ft Dry" como default e marque "validation_required".
 
-O peso e volume por unidade normalmente vêm das specs físicas da embalagem (get_packaging_specs), \
-mas o vendedor pode fornecer um valor real do cliente que SOBRESCREVE o padrão — por exemplo, se o \
-produto específico pesa diferente do peso máximo nominal da embalagem. Use o valor informado pelo \
-vendedor quando existir; senão, use o da spec.
+O campo `qty_per_transport` que você passa para `calculate_tco` vem do campo correspondente da \
+SKU/embalagem (qty_20ft_dry, qty_40ft_dry, etc — de `get_packaging_specs`), conforme o tipo de \
+transporte escolhido — um valor para o lado Goodpack, outro para o lado concorrente (cada \
+embalagem tem sua própria capacidade por container).
 
 Use get_transport_specs para verificar o limite de peso bruto do transporte escolhido \
-(standard_gross_weight_limit_kg e gross_weight_limit_kg). Se o peso total calculado (tara + carga) \
-por unidade × quantidade no transporte ultrapassar o gross_weight_limit_kg, avise o vendedor — isso \
-pode significar que menos unidades cabem no transporte do que a capacidade volumétrica sugeriria. \
-Esse aviso é informativo (não bloqueia o cálculo) — não existe ainda uma checagem automática de \
-limite legal por rota/destino.
+(standard_gross_weight_limit_kg e gross_weight_limit_kg). `calculate_tco` retorna \
+`weight_per_container_kg` em `logistics` — se esse valor ultrapassar o gross_weight_limit_kg, avise \
+o vendedor (isso pode significar que menos unidades cabem no transporte do que a capacidade \
+volumétrica sugeriria). Esse aviso é informativo (não bloqueia o cálculo) — não existe ainda uma \
+checagem automática de limite legal por rota/destino.
 """
 
 INVESTMENT = """## Investimento e payback
@@ -196,44 +185,25 @@ usar a embalagem Goodpack — ou que já teve um investimento para usar a embala
 pergunte o valor desse investimento para cada lado que se aplique. Não pergunte isso proativamente \
 em toda oportunidade; só explore se o contexto sugerir adaptação de linha/processo.
 
-Cálculo de payback: **Investment Required ÷ Saving Total do ciclo de lease** = número de ciclos de \
-lease necessários para pagar o investimento. Por exemplo, se o investimento é $50,000 e o saving \
-total do ciclo (lease_days) é $40,000, o payback é 1.25 ciclos. Se não houver investimento \
-informado, omita o cálculo de payback (não invente investimento zero como se fosse um dado real).
+Passe `investment_goodpack`/`investment_competitor` para `calculate_tco` apenas quando o vendedor \
+tiver informado um valor — a tool calcula o payback (investimento ÷ saving total) sozinha. Se não \
+houver investimento informado, NÃO passe esses campos (omita, não passe zero) — a tool entende a \
+ausência como "sem investimento" e não inclui payback no resultado.
 """
 
 LOGISTICS = """## Estatísticas logísticas (Transports Needed, Units Needed, etc.)
 
-Além do custo, o relatório final mostra estatísticas operacionais de cada lado da comparação. \
-Use os dados físicos da embalagem (capacidade, quantidade por container) que você já tem na base \
-de conhecimento — nunca pergunte isso ao vendedor, são specs técnicas fixas do produto.
+Essas estatísticas (Carga real por unidade, Units Needed, Transports Needed, QTY Pallet Places, \
+QTY Full Stacks, Peso por container) são calculadas pela tool `calculate_tco`, não por você — ela \
+já aplica a lógica de "carga real por unidade = MÍNIMO entre Max Payload nominal e Densidade × \
+Volume", que evita superestimar quanto cabe por unidade em produtos de baixa densidade (óleos, \
+Tobacco, etc).
 
-Fórmulas:
-- **Carga real por unidade (kg)** = MÍNIMO entre Max Payload por unidade (peso nominal da \
-embalagem) e Densidade do produto × Volume da embalagem em litros (get_product_density × \
-volume_liters de get_packaging_specs). Produtos de baixa densidade (ex: óleos ~0.90-0.92 kg/L, \
-Tobacco ~0.27 kg/L) costumam encher o volume da embalagem ANTES de atingir o peso máximo nominal \
-— nesse caso, usar o Max Payload sozinho superestima quanto cabe por unidade e SUBESTIMA Units \
-Needed. Sempre calcule os dois e use o menor.
-- **Units Needed** = Volume Simulado (em kg) ÷ Carga real por unidade (acima) — ou pelo peso \
-informado pelo vendedor, se ele tiver sobrescrito o padrão (ver seção Transporte). Arredonde para \
-cima.
-- **Transports Needed** = Units Needed ÷ Quantidade de unidades que cabem no tipo de transporte \
-escolhido (ex: 16 unidades por 20ft Dry para o MB6 — use o campo correspondente da SKU/embalagem: \
-qty_20ft_dry, qty_40ft_dry, etc, conforme o transporte indicado pelo vendedor ou assumido como \
-padrão). Arredonde para cima.
-- **QTY Pallet Places** = normalmente igual a Units Needed, a menos que a embalagem tenha uma regra \
-de empilhamento que reduza posições de piso (ex: paletes empilháveis) — quando não souber, assuma \
-igual a Units Needed e marque como "high_confidence".
-- **QTY Full Stacks** = Units Needed ÷ Quantidade empilhável em warehouse (stack_full_warehouse da \
-SKU/embalagem). Arredonde para cima.
-- **Peso por container (informativo)** = (Carga real por unidade + Tare Weight) × unidades por \
-container do transporte escolhido. Apresente este número junto ao resultado como referência — sem \
-checagem automática contra limite legal de rota, isso fica a critério do vendedor por enquanto.
-
-Se a embalagem (Goodpack ou concorrente) não tiver esses dados físicos cadastrados na base, pergunte \
-ao vendedor ou avise explicitamente que a estatística não pode ser calculada — nunca invente um \
-valor de capacidade.
+Seu trabalho aqui é só garantir que `goodpack_specs`, `competitor_specs` e `density_kg_per_liter` \
+passados para a tool vieram de `get_packaging_specs`/`get_product_density` (ou do vendedor, se ele \
+sobrescreveu algum valor) — nunca invente um valor de capacidade ou densidade de memória. Se a \
+embalagem não tiver esses dados físicos cadastrados na base (campo vier null), a tool retorna \
+`null` nessa estatística — avise o vendedor que não dá pra calcular em vez de estimar.
 """
 
 RESPONSE_STRUCTURE = """## Estrutura de uma resposta típica
@@ -295,8 +265,18 @@ QUANDO NÃO emitir:
 
 TCO_RESULT_SCHEMA = """## Quando gerar o resultado do TCO (formato estruturado)
 
-No modo express, gere isso imediatamente após ter os 9 dados mínimos (ver seção Modo TCO Express) \
-— não espere o vendedor pedir. Gere o resultado em DUAS partes na mesma resposta:
+No modo express, gere isso imediatamente após ter os 9 dados mínimos e já ter chamado \
+`calculate_tco` (ver seção Modo TCO Express) — não espere o vendedor pedir. Os campos \
+`categories`, `packaging_breakdown`, `competitor_packaging_breakdown`, `goodpack_qty_per_unit_kg`, \
+`goodpack_qty_per_transport`, `goodpack_stack_full_warehouse`, `goodpack_transport_cost_per_container`, \
+`goodpack_total_per_mt`, `competitor_total_per_mt`, `goodpack_total_per_unit`, \
+`competitor_total_per_unit`, `total_saving`, `saving_percentage`, `logistics` e `investment` vêm \
+DIRETO do retorno de `calculate_tco` — copie os valores, não recalcule nada. Só `customer_name`, \
+`product_name`, `goodpack_sku`, `competitor_name`, `transport_type`, `simulated_metric_tonnes`, \
+`product_density`, `lease_days`, `currency` e `assumptions` são preenchidos por você a partir da \
+conversa.
+
+Gere o resultado em DUAS partes na mesma resposta:
 
 1. Um texto breve de transição (ex: "TCO calculado. Aqui está o resultado:")
 2. Um bloco JSON delimitado exatamente por estas marcações, sem nada mais dentro delas:
