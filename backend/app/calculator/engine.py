@@ -237,6 +237,7 @@ def calculate_tco(
         "categories": categories,
         "packaging_breakdown": gp_breakdown,
         "competitor_packaging_breakdown": comp_breakdown,
+        "handling_benchmarks": handling_benchmarks,
         "goodpack_qty_per_unit_kg": gp_qty_kg,
         "goodpack_qty_per_transport": transport_qty_per_container_goodpack,
         "goodpack_stack_full_warehouse": goodpack_specs.get("stack_full_warehouse"),

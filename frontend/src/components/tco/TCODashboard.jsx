@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, ChevronDown, Loader2, Truck, Package, Layers, Boxes, TrendingUp, RotateCcw, AlertTriangle, Check, SlidersHorizontal } from 'lucide-react'
+import { Download, ChevronDown, Loader2, Truck, Package, Layers, Boxes, TrendingUp, RotateCcw, AlertTriangle, Check, Pencil } from 'lucide-react'
 import ConfidenceBadge from '../ui/ConfidenceBadge'
 import {
   recalcPackagingByPrice, recalcCategoryByUnitPrice, recalcCategoriesByQty,
   recalcLogistics, recalcTotals, matchAssumption,
+  computeHandlingPacker, computeHandlingEnduser, getOverrideValue,
 } from './dashboardCalc'
 
 const STACK_COLORS = ['#378ADD', '#888780', '#85B7EB', '#BA7517', '#1D9E75']
@@ -34,9 +35,17 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
   const [competitorQtyPerUnit, setCompetitorQtyPerUnit] = useState(null)
   const [confirmedItems, setConfirmedItems] = useState(() => new Set())
   const [confirmedCompetitorItems, setConfirmedCompetitorItems] = useState(() => new Set())
-  const [fullCustomization, setFullCustomization] = useState(false)
-  const [handlingPackerPerUnit, setHandlingPackerPerUnit] = useState(null)
-  const [handlingEnduserPerUnit, setHandlingEnduserPerUnit] = useState(null)
+
+  // Premissas editáveis direto na lista (ver assumptions[].override_key) —
+  // substitui o antigo botão "Customização completa": Handling agora edita
+  // por parâmetro individual (recalcula a soma na hora, mesma fórmula do
+  // backend portada pra JS), e densidade/tipo de transporte/frete ficam
+  // confirmáveis ali também.
+  const [handlingBenchmarks, setHandlingBenchmarks] = useState({})
+  const [confirmedAssumptionKeys, setConfirmedAssumptionKeys] = useState(() => new Set())
+  const [density, setDensity] = useState(null)
+  const [transportType, setTransportType] = useState(null)
+  const [transportCostPerContainer, setTransportCostPerContainer] = useState(null)
 
   // Capacidade & quantidade por container — só os 2 parâmetros que de fato
   // variam por negócio: peso envasado (kg real por unidade) e qtd/container.
@@ -48,7 +57,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
   // dele qualquer valor que o vendedor já tinha confirmado nesta sessão —
   // em vez de resetar tudo pro default do resultado novo e perder a edição.
   useEffect(() => {
-    const ov = (key, fallback) => (overrides[key] !== undefined ? overrides[key] : fallback)
+    const ov = (key, fallback) => getOverrideValue(overrides, key, fallback)
 
     setBreakdown((result?.packaging_breakdown ?? []).map(item => ({
       ...item, value: ov(`breakdown:${item.label}`, item.value),
@@ -60,11 +69,20 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     setCompetitorQtyPerUnit(ov('competitorQtyPerUnit', result?.competitor_qty_per_unit_kg ?? null))
     setConfirmedItems(new Set())
     setConfirmedCompetitorItems(new Set())
-    setFullCustomization(false)
-    const packerCat = result?.categories?.find(c => c.label === 'Handling packer')
-    const enduserCat = result?.categories?.find(c => c.label === 'Handling enduser')
-    setHandlingPackerPerUnit(ov('handlingPackerPerUnit', packerCat?.goodpack_per_unit ?? null))
-    setHandlingEnduserPerUnit(ov('handlingEnduserPerUnit', enduserCat?.goodpack_per_unit ?? null))
+
+    // Handling: parte do dict que o agente devolveu, reaplica por cima
+    // qualquer parâmetro individual já validado (hb:<param_key>).
+    const baseHb = result?.handling_benchmarks ?? {}
+    const mergedHb = {}
+    for (const key of Object.keys(baseHb)) {
+      mergedHb[key] = ov(`hb:${key}`, baseHb[key])
+    }
+    setHandlingBenchmarks(mergedHb)
+    setConfirmedAssumptionKeys(new Set())
+
+    setDensity(ov('density', result?.product_density ?? null))
+    setTransportType(ov('transport_type', result?.transport_type ?? null))
+    setTransportCostPerContainer(ov('transport_cost_per_container', result?.goodpack_transport_cost_per_container ?? null))
 
     setGoodpackQtyPerTransport(ov('goodpackQtyPerTransport', result?.goodpack_qty_per_transport ?? null))
     setCompetitorQtyPerTransport(ov('competitorQtyPerTransport', result?.competitor_qty_per_transport ?? null))
@@ -97,11 +115,11 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     const gpQtyChanged = hasEditableQty && effectiveGpQty !== origGpQtyKg
     const gpQtyPerTransport = goodpackQtyPerTransport ?? result?.goodpack_qty_per_transport ?? null
     const gpStackFullWarehouse = result?.goodpack_stack_full_warehouse ?? null
-    const transportCostPerContainer = result?.goodpack_transport_cost_per_container ?? null
+    const effectiveTransportCost = transportCostPerContainer ?? result?.goodpack_transport_cost_per_container ?? null
     const gpQtyRatio = gpQtyChanged && origGpQtyKg ? origGpQtyKg / effectiveGpQty : 1
 
     const recalcedByQtyGoodpack = gpQtyChanged && effectiveGpQty
-      ? recalcCategoriesByQty(categories, 'goodpack', effectiveGpQty, origGpQtyKg, gpQtyPerTransport, transportCostPerContainer)
+      ? recalcCategoriesByQty(categories, 'goodpack', effectiveGpQty, origGpQtyKg, gpQtyPerTransport, effectiveTransportCost)
       : null
 
     // --- Lado Concorrente: mesmo padrão do Goodpack — campo direto de
@@ -113,7 +131,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     const compStackFullWarehouse = result?.competitor_stack_full_warehouse ?? null
 
     const recalcedByQtyCompetitor = compQtyChanged && effectiveCompQty
-      ? recalcCategoriesByQty(categories, 'competitor', effectiveCompQty, origCompQtyKg, compQtyPerTransport, transportCostPerContainer)
+      ? recalcCategoriesByQty(categories, 'competitor', effectiveCompQty, origCompQtyKg, compQtyPerTransport, effectiveTransportCost)
       : null
 
     // Cada categoria com preço editável é recalculada pelo preço e depois
@@ -135,16 +153,34 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
       }
     }
 
-    if (fullCustomization && handlingPackerCategory && handlingPackerPerUnit != null) {
-      const hp = recalcCategoryByUnitPrice(
-        handlingPackerPerUnit, handlingPackerCategory.goodpack_per_unit ?? 0, handlingPackerCategory.goodpack ?? 0
-      )
+    // Transport: se o frete por container foi editado, recalcula igual o
+    // backend faz (custo por container ÷ qty real que cabe em MT).
+    if (transportCostPerContainer != null && effectiveGpQty) {
+      const liquidMtPerContainerGp = (effectiveGpQty / 1000) * gpQtyPerTransport
+      if (liquidMtPerContainerGp) {
+        categoryOverrides.Transport = categoryOverrides.Transport || {}
+        categoryOverrides.Transport.perMt = transportCostPerContainer / liquidMtPerContainerGp
+      }
+    }
+    if (transportCostPerContainer != null && effectiveCompQty && compQtyPerTransport) {
+      const liquidMtPerContainerComp = (effectiveCompQty / 1000) * compQtyPerTransport
+      if (liquidMtPerContainerComp) {
+        categoryOverrides.Transport = categoryOverrides.Transport || {}
+        categoryOverrides.Transport.competitorPerMt = transportCostPerContainer / liquidMtPerContainerComp
+      }
+    }
+
+    // Handling: sempre computado ao vivo a partir do dict de parâmetros —
+    // sem isso ser "editado" tecnicamente, o resultado bate com o que o
+    // agente já tinha calculado (mesma fórmula, portada fielmente pro JS).
+    if (Object.keys(handlingBenchmarks).length > 0 && handlingPackerCategory) {
+      const hpPerUnit = computeHandlingPacker(handlingBenchmarks, gpStackFullWarehouse)
+      const hp = recalcCategoryByUnitPrice(hpPerUnit, handlingPackerCategory.goodpack_per_unit ?? 0, handlingPackerCategory.goodpack ?? 0)
       categoryOverrides['Handling packer'] = { perMt: hp.perMt * gpQtyRatio }
     }
-    if (fullCustomization && handlingEnduserCategory && handlingEnduserPerUnit != null) {
-      const he = recalcCategoryByUnitPrice(
-        handlingEnduserPerUnit, handlingEnduserCategory.goodpack_per_unit ?? 0, handlingEnduserCategory.goodpack ?? 0
-      )
+    if (Object.keys(handlingBenchmarks).length > 0 && handlingEnduserCategory) {
+      const hePerUnit = computeHandlingEnduser(handlingBenchmarks, gpStackFullWarehouse)
+      const he = recalcCategoryByUnitPrice(hePerUnit, handlingEnduserCategory.goodpack_per_unit ?? 0, handlingEnduserCategory.goodpack ?? 0)
       categoryOverrides['Handling enduser'] = { perMt: he.perMt * gpQtyRatio }
     }
 
@@ -180,8 +216,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     breakdown, competitorBreakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty,
     hasEditableCompetitorBreakdown, originalPackagingPerUnit, originalPackagingPerMt,
     originalCompetitorPackagingPerUnit, originalCompetitorPackagingPerMt, categories,
-    fullCustomization, handlingPackerPerUnit, handlingEnduserPerUnit,
-    handlingPackerCategory, handlingEnduserCategory,
+    handlingBenchmarks, handlingPackerCategory, handlingEnduserCategory, transportCostPerContainer,
     goodpackQtyPerTransport, competitorQtyPerUnit, hasEditableCompetitorQty, competitorQtyPerTransport,
   ])
 
@@ -217,7 +252,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
 
   function handleBreakdownChange(index, newValue) {
     setBreakdown(prev => prev.map((item, i) => i === index ? { ...item, value: newValue } : item))
-    onOverrideChange(`breakdown:${breakdown[index]?.label}`, newValue)
+    onOverrideChange(`breakdown:${breakdown[index]?.label}`, newValue, `${breakdown[index]?.label} (Goodpack)`)
   }
 
   function handleConfirmItem(index) {
@@ -226,7 +261,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
 
   function handleCompetitorBreakdownChange(index, newValue) {
     setCompetitorBreakdown(prev => prev.map((item, i) => i === index ? { ...item, value: newValue } : item))
-    onOverrideChange(`compBreakdown:${competitorBreakdown[index]?.label}`, newValue)
+    onOverrideChange(`compBreakdown:${competitorBreakdown[index]?.label}`, newValue, `${competitorBreakdown[index]?.label} (Concorrente)`)
   }
 
   function handleConfirmCompetitorItem(index) {
@@ -235,31 +270,40 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
 
   function handleQtyPerUnitChange(newValue) {
     setQtyPerUnit(newValue)
-    onOverrideChange('qtyPerUnit', newValue)
+    onOverrideChange('qtyPerUnit', newValue, 'Peso envasado Goodpack (kg/unidade)')
   }
 
   function handleCompetitorQtyPerUnitChange(newValue) {
     setCompetitorQtyPerUnit(newValue)
-    onOverrideChange('competitorQtyPerUnit', newValue)
-  }
-
-  function handleHandlingPackerChange(newValue) {
-    setHandlingPackerPerUnit(newValue)
-    onOverrideChange('handlingPackerPerUnit', newValue)
-  }
-
-  function handleHandlingEnduserChange(newValue) {
-    setHandlingEnduserPerUnit(newValue)
-    onOverrideChange('handlingEnduserPerUnit', newValue)
+    onOverrideChange('competitorQtyPerUnit', newValue, 'Peso envasado concorrente (kg/unidade)')
   }
 
   function handleGoodpackQtyPerTransportChange(newValue) {
     setGoodpackQtyPerTransport(newValue)
-    onOverrideChange('goodpackQtyPerTransport', newValue)
+    onOverrideChange('goodpackQtyPerTransport', newValue, 'Quantidade Goodpack por container')
   }
   function handleCompetitorQtyPerTransportChange(newValue) {
     setCompetitorQtyPerTransport(newValue)
-    onOverrideChange('competitorQtyPerTransport', newValue)
+    onOverrideChange('competitorQtyPerTransport', newValue, 'Quantidade concorrente por container')
+  }
+
+  // --- Validação inline na lista de premissas (assumptions[].override_key) ---
+  function handleHandlingParamChange(paramKey, newValue) {
+    setHandlingBenchmarks(prev => ({ ...prev, [paramKey]: newValue }))
+  }
+  function handleDensityChange(newValue) {
+    setDensity(newValue)
+  }
+  function handleTransportTypeChange(newValue) {
+    setTransportType(newValue)
+  }
+  function handleTransportCostChange(newValue) {
+    setTransportCostPerContainer(newValue)
+  }
+
+  function handleValidateAssumption(assumptionKey, overrideKey, value, label) {
+    setConfirmedAssumptionKeys(prev => new Set(prev).add(assumptionKey))
+    onOverrideChange(overrideKey, value, label)
   }
 
   function handleReset() {
@@ -269,9 +313,11 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     setCompetitorQtyPerUnit(result?.competitor_qty_per_unit_kg ?? null)
     setConfirmedItems(new Set())
     setConfirmedCompetitorItems(new Set())
-    setFullCustomization(false)
-    setHandlingPackerPerUnit(handlingPackerCategory?.goodpack_per_unit ?? null)
-    setHandlingEnduserPerUnit(handlingEnduserCategory?.goodpack_per_unit ?? null)
+    setConfirmedAssumptionKeys(new Set())
+    setHandlingBenchmarks(result?.handling_benchmarks ?? {})
+    setDensity(result?.product_density ?? null)
+    setTransportType(result?.transport_type ?? null)
+    setTransportCostPerContainer(result?.goodpack_transport_cost_per_container ?? null)
     setGoodpackQtyPerTransport(result?.goodpack_qty_per_transport ?? null)
     setCompetitorQtyPerTransport(result?.competitor_qty_per_transport ?? null)
     onOverrideChange(null, null) // sinaliza pro pai limpar todas as correções confirmadas desta análise
@@ -373,11 +419,12 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     || qtyPerUnit !== result.goodpack_qty_per_unit_kg
   )) || (hasEditableCompetitorBreakdown && result.competitor_packaging_breakdown && (
     competitorBreakdown.some((item, i) => item.value !== result.competitor_packaging_breakdown[i]?.value)
-  )) || (fullCustomization && (
-    handlingPackerPerUnit !== (handlingPackerCategory?.goodpack_per_unit ?? null)
-    || handlingEnduserPerUnit !== (handlingEnduserCategory?.goodpack_per_unit ?? null)
   )) || (
-    competitorQtyPerUnit !== (result?.competitor_qty_per_unit_kg ?? null)
+    JSON.stringify(handlingBenchmarks) !== JSON.stringify(result?.handling_benchmarks ?? {})
+    || density !== (result?.product_density ?? null)
+    || transportType !== (result?.transport_type ?? null)
+    || transportCostPerContainer !== (result?.goodpack_transport_cost_per_container ?? null)
+    || competitorQtyPerUnit !== (result?.competitor_qty_per_unit_kg ?? null)
     || goodpackQtyPerTransport !== (result?.goodpack_qty_per_transport ?? null)
     || competitorQtyPerTransport !== (result?.competitor_qty_per_transport ?? null)
   )
@@ -545,50 +592,6 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
             </p>
           </div>
 
-          <button
-            onClick={() => setFullCustomization(v => !v)}
-            className="flex items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2 py-2 rounded-md border border-slate-200 hover:bg-slate-50 transition-colors"
-          >
-            <SlidersHorizontal size={12} />
-            {fullCustomization ? 'Voltar ao modo express' : 'Customização completa'}
-          </button>
-
-          {fullCustomization && (
-            <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200">
-              <p className="text-xs font-medium text-slate-700">Parâmetros avançados</p>
-              <p className="text-[11px] text-slate-400 mb-2.5">Handling — {goodpackSku}</p>
-              <div className="flex flex-col gap-2.5">
-                {handlingPackerCategory && (
-                  <div>
-                    <label className="text-[11px] text-slate-500 block mb-1">Handling packer (por unidade)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={handlingPackerPerUnit ?? ''}
-                      onChange={(e) => handleHandlingPackerChange(parseFloat(e.target.value) || 0)}
-                      className="w-full text-sm border border-blue-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-300"
-                    />
-                  </div>
-                )}
-                {handlingEnduserCategory && (
-                  <div>
-                    <label className="text-[11px] text-slate-500 block mb-1">Handling enduser (por unidade)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={handlingEnduserPerUnit ?? ''}
-                      onChange={(e) => handleHandlingEnduserChange(parseFloat(e.target.value) || 0)}
-                      className="w-full text-sm border border-blue-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-300"
-                    />
-                  </div>
-                )}
-              </div>
-              <p className="text-[10px] text-slate-400 mt-2">
-                Tipo de transporte ainda não é editável aqui — depende de dado que falta expor no resultado do agente.
-              </p>
-            </div>
-          )}
-
           <div className="bg-slate-50 rounded-lg p-3.5">
             <p className="text-xs font-medium text-slate-700 mb-2.5">Demais categorias</p>
             <div className="flex flex-col gap-1.5 text-[11px]">
@@ -690,26 +693,65 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
             </div>
           )}
 
-          {assumptions.length > 0 && (
-            <div className="mb-4">
-              <p className="text-xs text-slate-400 mb-2">Premissas usadas neste cálculo</p>
-              <div className="space-y-2">
-                {assumptions.map((a, i) => (
-                  <div key={i} className="bg-slate-50 rounded-lg px-3 py-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-xs text-slate-700 leading-relaxed flex-1">{a.label}</p>
-                      <div className="flex-shrink-0">
-                        <ConfidenceBadge level={a.confidence_level} />
+          {assumptions.length > 0 && (() => {
+            const getAccessor = (overrideKey) => {
+              if (!overrideKey) return null
+              if (overrideKey.startsWith('hb:')) {
+                const paramKey = overrideKey.slice(3)
+                return { value: handlingBenchmarks[paramKey], setValue: (v) => handleHandlingParamChange(paramKey, v) }
+              }
+              if (overrideKey === 'density') return { value: density, setValue: handleDensityChange }
+              if (overrideKey === 'transport_type') return { value: transportType, setValue: handleTransportTypeChange }
+              if (overrideKey === 'transport_cost_per_container') return { value: transportCostPerContainer, setValue: handleTransportCostChange }
+              return null
+            }
+
+            return (
+              <div className="mb-4">
+                <p className="text-xs text-slate-400 mb-2">Premissas usadas neste cálculo</p>
+                <div className="space-y-2">
+                  {assumptions.map((a, i) => {
+                    const accessor = getAccessor(a.override_key)
+                    const isConfirmed = confirmedAssumptionKeys.has(i)
+                    const showInput = accessor && !isConfirmed
+
+                    return (
+                      <div key={i} className={'rounded-lg px-3 py-2 ' + (isConfirmed ? 'bg-emerald-50' : 'bg-slate-50')}>
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-xs text-slate-700 leading-relaxed flex-1">{a.label}</p>
+                          <div className="flex-shrink-0">
+                            <ConfidenceBadge level={isConfirmed ? 'verified' : a.confidence_level} />
+                          </div>
+                        </div>
+                        {a.source && (
+                          <p className="text-[11px] text-slate-400 mt-1">Fonte: {a.source}</p>
+                        )}
+                        {showInput && (
+                          <div className="flex gap-1.5 mt-2">
+                            <input
+                              type={a.value_type === 'text' ? 'text' : 'number'}
+                              step="0.01"
+                              value={accessor.value ?? ''}
+                              onChange={(e) => accessor.setValue(
+                                a.value_type === 'text' ? e.target.value : (parseFloat(e.target.value) || 0)
+                              )}
+                              className="flex-1 text-xs border border-blue-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                            />
+                            <button
+                              onClick={() => handleValidateAssumption(i, a.override_key, accessor.value, a.label)}
+                              className="flex items-center gap-1 text-[11px] px-2 rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors whitespace-nowrap"
+                            >
+                              <Pencil size={10} /> Validar
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    {a.source && (
-                      <p className="text-[11px] text-slate-400 mt-1">Fonte: {a.source}</p>
-                    )}
-                  </div>
-                ))}
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {sessionId && (
             <div className="relative">

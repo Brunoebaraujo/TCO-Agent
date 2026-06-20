@@ -35,12 +35,12 @@ export default function ChatPage() {
   const bottomRef = useRef(null)
 
   // key=null sinaliza "limpar tudo" (usado pelo botão Restaurar do dashboard)
-  const handleOverrideChange = useCallback((key, value) => {
+  const handleOverrideChange = useCallback((key, value, label) => {
     if (key === null) {
       setOverrides({})
       return
     }
-    setOverrides(prev => ({ ...prev, [key]: value }))
+    setOverrides(prev => ({ ...prev, [key]: { value, label } }))
   }, [])
 
   useEffect(() => {
@@ -217,7 +217,18 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
-      <div className="px-6 py-4 border-t border-slate-200 bg-white">
+      <div className="px-6 py-3 border-t border-slate-200 bg-white">
+        {messages.some(m => m.tco_result) && (
+          <button
+            onClick={() => submitUserMessage(
+              'Finalizar análise. Revise todos os valores que confirmei nesta sessão e me pergunte quais são elegíveis pra atualizar a knowledge base.'
+            )}
+            disabled={loading}
+            className="w-full mb-3 px-4 py-2 text-sm font-medium text-[#1a3a5c] border border-[#1a3a5c]/30 rounded-xl hover:bg-[#1a3a5c]/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Finalizar TCO
+          </button>
+        )}
         <form onSubmit={sendMessage} className="flex gap-3">
           <input
             type="text"

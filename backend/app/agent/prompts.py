@@ -57,6 +57,15 @@ de novo (ex: o vendedor pediu pra mudar o volume), ele recalcula do zero a parti
 que você passar. Sem esse bloco, uma correção que o vendedor confirmou numa rodada anterior se \
 perderia na próxima chamada da tool, voltando pro valor de benchmark original — o vendedor já \
 reportou esse problema antes, não regrida nisso.
+
+Os itens do bloco podem vir de duas origens — trate igual, mude só onde aplicar o valor:
+- Acessórios e quantidade/container — vão direto nos parâmetros de mesmo nome de `calculate_tco`.
+- Itens validados na lista de premissas (ver `override_key` no TCO_RESULT_SCHEMA) — chegam como \
+"Labor cost packer (hb:packer_labor_cost_per_hour): 13", "Densidade do produto (density): 1,10", \
+"Tipo de transporte (transport_type): 40ft Reefer", "Frete por container (transport_cost_per_container): 4500". \
+O texto entre parênteses é a chave técnica — `hb:X` vai dentro do dict `handling_benchmarks` na \
+posição `X`; `density`, `transport_type` e `transport_cost_per_container` são os parâmetros de \
+mesmo nome de `calculate_tco`/do TCO_RESULT.
 """
 
 EXPRESS_MODE = """## Modo TCO Express (fluxo padrão de entrada)
@@ -262,6 +271,12 @@ Depois de atualizar, confirme em uma frase curta o que foi salvo.
 
 Não ofereça isso toda resposta — só quando o TCO_RESULT daquele turno especificamente usou um \
 valor do bloco de overrides confirmados (ou seja, algo realmente mudou desde o último cálculo).
+
+**Exceção:** se a mensagem do vendedor for literalmente "Finalizar análise. Revise todos os \
+valores que confirmei nesta sessão..." (vem do botão "Finalizar TCO" do dashboard), revise TODO \
+o bloco `[VALORES CONFIRMADOS NESTA SESSÃO: ...]` da mensagem (não só o que mudou neste turno) e \
+liste de uma vez todos os itens elegíveis pra atualizar, mesmo os que você já tinha oferecido — o \
+vendedor pode ter ignorado uma oferta anterior e quer decidir tudo de uma vez no fechamento.
 """
 
 PENDING_BLOCK = """## Quando gerar o bloco de pendências (<<<PENDING>>>)
@@ -378,11 +393,27 @@ Gere o resultado em DUAS partes na mesma resposta:
     "goodpack_payback_cycles": number,
     "competitor_payback_cycles": number
   },
+  "handling_benchmarks": {"packer_labor_cost_per_hour": number, "...todos os parâmetros packer_*/enduser_* usados...": number},
   "assumptions": [
-    {"label": "string descrevendo a premissa", "confidence_level": "verified | high_confidence | validation_required", "source": "string curta"}
+    {
+      "label": "string descrevendo a premissa",
+      "confidence_level": "verified | high_confidence | validation_required",
+      "source": "string curta",
+      "override_key": "string|null — ver tabela abaixo",
+      "value_type": "number|text|null — obrigatório se override_key não for null",
+      "current_value": "number|string|null — valor atual, pro campo já vir preenchido no input"
+    }
   ]
 }
 <<<END_TCO_RESULT>>>
+
+**Tabela de `override_key`** — preencha em CADA assumption cujo valor é editável diretamente no \
+dashboard (deixe `null` nas que não são — ex: acessórios, que já têm edição própria em \
+`packaging_breakdown`):
+- Parâmetro de handling (qualquer um de `handling_benchmarks`): `hb:<param_key>` (ex: `hb:packer_labor_cost_per_hour`), value_type "number"
+- Densidade do produto: `density`, value_type "number"
+- Tipo de transporte: `transport_type`, value_type "text"
+- Frete por container: `transport_cost_per_container`, value_type "number"
 
 Regras importantes para esse bloco:
 - Todos os números são valores numéricos puros (sem símbolo de moeda, sem separador de milhar).
@@ -395,6 +426,8 @@ Regras importantes para esse bloco:
 - `logistics` usa as fórmulas definidas na seção "Estatísticas logísticas" acima. Arredonde todos os valores para inteiros (para cima), exceto `weight_per_container_kg` que pode ter 1 casa decimal.
 - `investment`: omita o bloco inteiro (não inclua a chave) se nenhum investimento foi mencionado pelo vendedor — não invente valores zero como se fossem dados reais. Se incluir, `*_payback_cycles` = investimento ÷ saving total do ciclo correspondente.
 - `assumptions` deve listar TODAS as premissas usadas no cálculo, mesmo as triviais, com o nível de confiança real — incluindo uma entrada por acessório individual.
+- `handling_benchmarks` deve ser exatamente o dict que você passou pra `calculate_tco` (cópia, não invente nada novo) — o dashboard usa isso pra deixar cada parâmetro de handling editável individualmente, em vez de só o total agregado.
+- `override_key`/`value_type`/`current_value`: preencha conforme a tabela acima em toda assumption editável. Isso faz o vendedor conseguir corrigir o valor direto na lista de premissas (botão "Validar" + campo), sem precisar achar onde esse dado fica escondido em outro painel. Premissas sem campo editável correspondente (ex: texto livre, contexto) ficam com os três campos `null`.
 - NUNCA invente esse bloco se não tiver dados suficientes — primeiro pergunte o que falta (ver seção Modo TCO Express para o que é mínimo necessário).
 - O JSON deve ser válido e parseável — sem comentários, sem texto extra dentro dos marcadores.
 """

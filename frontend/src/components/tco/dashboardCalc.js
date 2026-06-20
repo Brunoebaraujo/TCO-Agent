@@ -188,6 +188,43 @@ export function recalcTotals(result, categoryOverrides, recalcedByQtyGoodpack, r
   return { goodpackTotalPerMt, competitorTotalPerMt, totalSaving, savingPercentage, categoriesRecalced }
 }
 
+/**
+ * Handling Packer = Storage + Assembly + Stacking + Loading, por unidade.
+ * Porta fiel de compute_handling_packer() em app/calculator/engine.py —
+ * MESMA fórmula, pra edição individual de parâmetro recalcular na hora,
+ * sem depender de round-trip pro agente.
+ *
+ * @param {Object} benchmarks - dict {param_key: value}, ex: {packer_labor_cost_per_hour: 11, ...}
+ * @param {number} stackFullWarehouse
+ */
+export function computeHandlingPacker(benchmarks, stackFullWarehouse) {
+  const g = (key) => Number(benchmarks?.[`packer_${key}`]) || 0
+  const storage = stackFullWarehouse ? (g('storage_cost_per_month_stack') * g('storage_time_months')) / stackFullWarehouse : 0
+  const assemblyRate = g('assembly_units_per_hour')
+  const assembly = assemblyRate ? (g('assembly_manpower') * g('labor_cost_per_hour')) / assemblyRate : 0
+  const stacking = g('stacking_manpower') * g('labor_cost_per_hour') * g('stacking_time_minutes') / 60
+  const loading = g('loading_manpower') * g('labor_cost_per_hour') * g('loading_time_minutes') / 60
+  return storage + assembly + stacking + loading
+}
+
+/**
+ * Handling Enduser = Storage + Disassembly + Remove Trash + Stacking Full +
+ * Stacking Empty + Unloading, por unidade. Porta fiel de
+ * compute_handling_enduser() — mesma nota do backend: 'remove_trash' não
+ * tem manpower próprio cadastrado, assume 1 pessoa.
+ */
+export function computeHandlingEnduser(benchmarks, stackFullWarehouse) {
+  const g = (key) => Number(benchmarks?.[`enduser_${key}`]) || 0
+  const storage = stackFullWarehouse ? (g('storage_cost_per_month_stack') * g('storage_time_months')) / stackFullWarehouse : 0
+  const disassemblyRate = g('disassembly_units_per_hour')
+  const disassembly = disassemblyRate ? (g('disassembly_manpower') * g('labor_cost_per_hour')) / disassemblyRate : 0
+  const removeTrash = 1 * g('labor_cost_per_hour') * g('remove_trash_minutes') / 60
+  const stackingFull = g('stacking_full_manpower') * g('labor_cost_per_hour') * g('stacking_full_minutes') / 60
+  const stackingEmpty = g('stacking_empty_manpower') * g('labor_cost_per_hour') * g('stacking_empty_minutes') / 60
+  const unloading = g('unloading_manpower') * g('labor_cost_per_hour') * g('unloading_minutes') / 60
+  return storage + disassembly + removeTrash + stackingFull + stackingEmpty + unloading
+}
+
 const OVERRIDE_LABELS = {
   qtyPerUnit: 'Peso envasado Goodpack (kg/unidade)',
   competitorQtyPerUnit: 'Peso envasado concorrente (kg/unidade)',
@@ -197,24 +234,48 @@ const OVERRIDE_LABELS = {
   competitorQtyPerTransport: 'Quantidade concorrente por container',
 }
 
+// Chaves cujo valor técnico precisa aparecer entre parênteses na mensagem
+// pro agente saber onde aplicar (ver tabela override_key no system prompt) —
+// itens validados na lista de premissas usam esse formato.
+const TECHNICAL_KEY_PREFIXES = ['hb:', 'density', 'transport_type', 'transport_cost_per_container']
+
+function isTechnicalKey(key) {
+  return TECHNICAL_KEY_PREFIXES.some(p => key === p || key.startsWith(p))
+}
+
+/**
+ * Lê só o valor de uma entrada de override, aceitando tanto o formato novo
+ * { value, label } quanto um valor solto (compatibilidade).
+ */
+export function getOverrideValue(overrides, key, fallback) {
+  const entry = overrides?.[key]
+  if (entry === undefined) return fallback
+  return (entry && typeof entry === 'object' && 'value' in entry) ? entry.value : entry
+}
+
 /**
  * Formata o mapa de overrides confirmados pelo vendedor (editados no
- * dashboard) num bloco de texto que vai colado na próxima mensagem enviada
- * ao agente — ver seção CONFIRMED_OVERRIDES do system prompt. Sem isso, uma
- * correção feita no dashboard se perderia na próxima vez que o agente
- * chamasse calculate_tco (a tool não tem memória própria).
+ * dashboard, ou validados na lista de premissas) num bloco de texto que vai
+ * colado na próxima mensagem enviada ao agente — ver seção
+ * CONFIRMED_OVERRIDES do system prompt. Sem isso, uma correção feita no
+ * dashboard se perderia na próxima vez que o agente chamasse calculate_tco
+ * (a tool não tem memória própria).
  *
- * @param {Object} overrides - mapa { key: value }
+ * @param {Object} overrides - mapa { key: {value, label} } (ou { key: value } por compatibilidade)
  * @returns {string} bloco formatado, ou string vazia se não houver overrides
  */
 export function formatOverridesBlock(overrides) {
   const entries = Object.entries(overrides || {}).filter(([, v]) => v != null)
   if (entries.length === 0) return ''
 
-  const lines = entries.map(([key, value]) => {
+  const lines = entries.map(([key, entry]) => {
+    const value = (entry && typeof entry === 'object' && 'value' in entry) ? entry.value : entry
+    const label = (entry && typeof entry === 'object' && entry.label) ? entry.label : null
+
     if (key.startsWith('breakdown:')) return `- Acessório/Item "${key.slice(10)}" (Goodpack): ${value}`
     if (key.startsWith('compBreakdown:')) return `- Acessório/Item "${key.slice(14)}" (Concorrente): ${value}`
-    return `- ${OVERRIDE_LABELS[key] || key}: ${value}`
+    if (isTechnicalKey(key)) return `- ${label || key} (${key}): ${value}`
+    return `- ${label || OVERRIDE_LABELS[key] || key}: ${value}`
   })
 
   return `[VALORES CONFIRMADOS NESTA SESSÃO — use estes em vez de buscar benchmark para estes campos específicos:\n${lines.join('\n')}]\n\n`
