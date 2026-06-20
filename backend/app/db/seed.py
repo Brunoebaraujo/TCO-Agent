@@ -56,20 +56,56 @@ GOODPACK_SKUS = [
 ]
 
 COMPETITOR_UNITS = [
-    dict(unit_name="Octabin", unit_type="bin"),
-    dict(unit_name="Drum 200L", unit_type="drum", volume_liters=200),
-    # Adicionadas em 17/06/2026 a pedido do usuário — apenas nome por agora,
-    # tipo/capacidade a confirmar.
-    dict(unit_name="Blue Ocean Container 1000"),
-    dict(unit_name="Blue Ocean Container 1250"),
-    dict(unit_name="Bottle in cage"),
-    dict(unit_name="Conical Drum"),
-    dict(unit_name="Cylindrical Drum"),
-    dict(unit_name="GPS Container"),
-    dict(unit_name="Schoeller Arca bin"),
-    dict(unit_name="Wooden Pallet"),
-    dict(unit_name="Plastic Pallet"),
-    dict(unit_name="Wooden Bin"),
+    dict(unit_name="Octabin", unit_type="bin",
+         volume_liters=1000, max_payload_kg=1200, tare_weight_kg=29,
+         qty_20ft_dry=20, qty_40ft_dry=40, qty_20ft_reefer=20, qty_40ft_reefer=40,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026)", specs_confidence="high_confidence"),
+    # Drum 200L é o mesmo container físico que "Cylindrical Drum" (200L, mesma
+    # fonte) sob um nome legado anterior ao levantamento de specs — specs e
+    # confiança copiadas de lá como proxy até confirmar se vale unificar os
+    # dois cadastros num só.
+    dict(unit_name="Drum 200L", unit_type="drum",
+         volume_liters=200, max_payload_kg=275, tare_weight_kg=16,
+         qty_20ft_dry=78, qty_40ft_dry=152, qty_20ft_reefer=70, qty_40ft_reefer=150,
+         specs_source="Proxy de 'Cylindrical Drum' (mesmo container, 200L) — Info_Packages.xlsx", specs_confidence="validation_required"),
+    dict(unit_name="Blue Ocean Container 1000",
+         volume_liters=1000, max_payload_kg=1250, tare_weight_kg=20,
+         qty_20ft_dry=20, qty_40ft_dry=40, qty_20ft_reefer=20, qty_40ft_reefer=40,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026)", specs_confidence="high_confidence"),
+    dict(unit_name="Blue Ocean Container 1250",
+         volume_liters=1250, max_payload_kg=1500, tare_weight_kg=24,
+         qty_20ft_dry=20, qty_40ft_dry=40, qty_20ft_reefer=20, qty_40ft_reefer=40,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026)", specs_confidence="high_confidence"),
+    dict(unit_name="Bottle in cage",
+         volume_liters=1250, max_payload_kg=1500, tare_weight_kg=70,
+         qty_20ft_dry=16, qty_40ft_dry=38, qty_20ft_reefer=16, qty_40ft_reefer=38,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026) — variante 'Large'", specs_confidence="high_confidence"),
+    dict(unit_name="Conical Drum",
+         volume_liters=227, max_payload_kg=275, tare_weight_kg=17,
+         qty_20ft_dry=78, qty_40ft_dry=156, qty_20ft_reefer=70, qty_40ft_reefer=150,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026)", specs_confidence="high_confidence"),
+    dict(unit_name="Cylindrical Drum",
+         volume_liters=200, max_payload_kg=275, tare_weight_kg=16,
+         qty_20ft_dry=78, qty_40ft_dry=152, qty_20ft_reefer=70, qty_40ft_reefer=150,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026)", specs_confidence="high_confidence"),
+    dict(unit_name="GPS Container",
+         volume_liters=1500, max_payload_kg=1500, tare_weight_kg=115,
+         qty_20ft_dry=16, qty_40ft_dry=32, qty_20ft_reefer=16, qty_40ft_reefer=32,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026)", specs_confidence="high_confidence"),
+    dict(unit_name="Schoeller Arca bin",
+         volume_liters=1044, max_payload_kg=1250, tare_weight_kg=90,
+         qty_20ft_dry=20, qty_40ft_dry=40, qty_20ft_reefer=20, qty_40ft_reefer=40,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026)", specs_confidence="high_confidence"),
+    dict(unit_name="Wooden Pallet",
+         volume_liters=1260, max_payload_kg=1260, tare_weight_kg=15,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026) — sem qty/container cadastrada na fonte", specs_confidence="high_confidence"),
+    dict(unit_name="Plastic Pallet",
+         volume_liters=1260, max_payload_kg=1260, tare_weight_kg=25,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026) — sem qty/container cadastrada na fonte", specs_confidence="high_confidence"),
+    dict(unit_name="Wooden Bin",
+         volume_liters=1150, max_payload_kg=1540, tare_weight_kg=126,
+         qty_20ft_dry=16, qty_40ft_dry=36, qty_20ft_reefer=16, qty_40ft_reefer=36,
+         specs_source="Info_Packages.xlsx (upload Bruno, 19/06/2026) — variante 126KG", specs_confidence="high_confidence"),
 ]
 
 # Hierarquia: categoria -> {produto -> [tipos]}
@@ -441,10 +477,17 @@ async def seed_initial_data(db: AsyncSession) -> None:
             db.add(GoodpackSKU(**sku_data))
     await db.flush()
 
-    # Competitor units
-    existing_units = (await db.execute(select(CompetitorUnit.unit_name))).scalars().all()
+    # Competitor units — upsert: mesma lógica do GoodpackSKU acima (atualiza
+    # specs se já existe, mantendo id; nunca toca unidades criadas manualmente
+    # fora desta lista).
+    existing_units = {u.unit_name: u for u in (await db.execute(select(CompetitorUnit))).scalars().all()}
     for unit_data in COMPETITOR_UNITS:
-        if unit_data["unit_name"] not in existing_units:
+        name = unit_data["unit_name"]
+        if name in existing_units:
+            unit = existing_units[name]
+            for field, value in unit_data.items():
+                setattr(unit, field, value)
+        else:
             db.add(CompetitorUnit(**unit_data))
     await db.flush()
 
