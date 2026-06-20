@@ -302,6 +302,14 @@ class ProductType(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
+    # Densidade aparente (kg de produto por litro de embalagem cheia) usada pelo
+    # TCO Express para estimar Units Needed sem que o vendedor precise informar.
+    # Para sólidos/semissólidos (ex: Tobacco, Olives) isto é densidade de
+    # enchimento (produto + ar/salmoura), não densidade pura do material —
+    # ver notes para a fonte de cada valor.
+    density_kg_per_liter: Mapped[Optional[float]] = mapped_column(Numeric(6, 3))
+    density_confidence: Mapped[str] = mapped_column(String(30), default="validation_required")
+
     product: Mapped["Product"] = relationship()
 
     __table_args__ = (UniqueConstraint("product_id", "type_name", name="uq_type_per_product"),)

@@ -141,6 +141,28 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "get_product_density",
+        "description": (
+            "Retorna a densidade aparente (kg de produto por litro de embalagem) de um produto, "
+            "usada para calcular Units Needed sem perguntar volume físico ao vendedor. Para "
+            "sólidos/semissólidos (ex: Tobacco, Cheese, Olives) o valor já é densidade de "
+            "enchimento (produto + ar/salmoura), não densidade pura do material. Use esta "
+            "ferramenta no modo TCO Express antes de calcular logística — NUNCA invente "
+            "densidade de memória. Se o produto não existir na base ou vier com "
+            "confidence_level 'validation_required', trate como estimativa e sinalize ao "
+            "vendedor que precisa ser confirmada com o cliente — nunca apresente como dado "
+            "verificado."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "product_name": {"type": "string", "description": "Nome do produto, ex: 'Orange', 'Tomato', 'Tobacco'"},
+                "type_name": {"type": "string", "description": "Tipo de processamento, se conhecido (ex: 'FCOJ', 'Paste'). Omitir para ver todos os tipos cadastrados do produto."},
+            },
+            "required": ["product_name"],
+        },
+    },
 ]
 
 
@@ -327,6 +349,44 @@ async def execute_tool(db: AsyncSession, tool_name: str, tool_input: dict) -> di
             "highest_paying_customer": entries[0] if entries else None,
             "lowest_paying_customer": entries[-1] if entries else None,
             "all_records": entries,
+        }
+
+    elif tool_name == "get_product_density":
+        query = (
+            select(ProductType)
+            .join(Product, ProductType.product_id == Product.id)
+            .where(Product.product_name.ilike(tool_input["product_name"]))
+        )
+        if tool_input.get("type_name"):
+            query = query.where(ProductType.type_name.ilike(tool_input["type_name"]))
+        rows = (await db.execute(query)).scalars().all()
+
+        if not rows:
+            return {
+                "found": False,
+                "message": (
+                    f"Produto '{tool_input['product_name']}' não cadastrado na base de densidade. "
+                    "Pergunte a densidade real ao vendedor (ou Brix do produto, se for suco/concentrado) "
+                    "antes de calcular Units Needed — não estime de memória."
+                ),
+            }
+
+        return {
+            "found": True,
+            "types": [
+                {
+                    "type_name": r.type_name,
+                    "density_kg_per_liter": float(r.density_kg_per_liter) if r.density_kg_per_liter else None,
+                    "confidence_level": r.density_confidence,
+                    "notes": r.notes,
+                }
+                for r in rows
+            ],
+            "note": (
+                "Se confidence_level for 'validation_required', use o valor como estimativa inicial "
+                "mas marque a premissa como 'validation_required' no resultado e sinalize que precisa "
+                "ser confirmada com o cliente — nunca apresente como dado verificado."
+            ),
         }
 
     return {"error": f"Tool desconhecida: {tool_name}"}

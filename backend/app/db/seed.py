@@ -74,16 +74,138 @@ COMPETITOR_UNITS = [
 
 # Hierarquia: categoria -> {produto -> [tipos]}
 PRODUCT_HIERARCHY = {
-    "Citrus": {
-        "Orange": ["NFC", "FCOJ", "Concentrate"],
-        "Lemon": ["NFC", "Concentrate"],
+    "AJC": {
+        "Apple": {
+            "NFC": dict(density=1.05, confidence="validation_required",
+                        notes="Single strength, ~11-12°Brix"),
+            "Concentrate": dict(density=1.35, confidence="validation_required",
+                                 notes="Padrão comercial ~70°Brix"),
+            "Puree": dict(density=1.05, confidence="validation_required",
+                          notes="Sem padrão de Brix tão fechado quanto suco"),
+        },
     },
-    "Fat and Oils": {
-        "Omega 3": ["Crude", "Refined"],
-        "Palm Oil": ["Crude", "Refined"],
+    "BNA": {
+        "Banana": {
+            "Puree": dict(density=1.07, confidence="validation_required",
+                          notes="Mais denso por conteúdo de amido"),
+        },
     },
-    "Fruit/Vegetable Derivatives": {
-        "Tomato": ["Purée", "Paste"],
+    "CIT": {
+        "Orange": {
+            "NFC": dict(density=1.05, confidence="validation_required", notes="~11-12°Brix"),
+            "FCOJ": dict(density=1.32, confidence="high_confidence",
+                         notes="SG verificada a 65°Brix (padrão industrial)"),
+            "Concentrate": dict(density=1.32, confidence="high_confidence",
+                                 notes="Mesma referência de FCOJ (~65°Brix)"),
+        },
+        "Lemon": {
+            "NFC": dict(density=1.03, confidence="validation_required",
+                        notes="Single strength, Brix mais baixo que laranja"),
+        },
+        "Lime": {
+            "NFC": dict(density=1.03, confidence="high_confidence",
+                        notes="SG verificada a 8°Brix (1,0318)"),
+        },
+        "Grapefruit": {
+            "NFC": dict(density=1.04, confidence="validation_required", notes="~10°Brix"),
+        },
+    },
+    "GJC": {
+        "Grape": {
+            "Concentrate": dict(density=1.34, confidence="validation_required",
+                                 notes="Padrão comercial ~68°Brix"),
+        },
+    },
+    "KFJ": {
+        "Aloe Vera": {
+            "Juice": dict(density=1.01, confidence="validation_required",
+                          notes="Baixo teor de sólidos, pouco padronizado"),
+        },
+        "Coconut": {
+            "Water": dict(density=1.02, confidence="validation_required", notes="Brix baixo, ~5-6"),
+        },
+        "Guava": {
+            "Puree": dict(density=1.05, confidence="validation_required", notes="Faixa típica de food science"),
+        },
+        "Kiwi": {
+            "Puree": dict(density=1.05, confidence="validation_required", notes="Faixa típica de food science"),
+        },
+        "Peach": {
+            "Puree": dict(density=1.04, confidence="validation_required", notes="Faixa típica de food science"),
+        },
+    },
+    "MNG": {
+        "Mango": {
+            "Puree": dict(density=1.05, confidence="validation_required", notes="Faixa típica de food science"),
+        },
+    },
+    "PNA": {
+        "Pineapple": {
+            "NFC": dict(density=1.05, confidence="validation_required", notes="~12-13°Brix"),
+            "Concentrate": dict(density=1.30, confidence="validation_required",
+                                 notes="Padrão comercial ~60-61°Brix"),
+        },
+    },
+    "TJC": {
+        "Tomato": {
+            "Puree": dict(density=1.07, confidence="high_confidence", notes="SG verificada a 8,5°Brix"),
+            "Paste": dict(density=1.12, confidence="high_confidence",
+                          notes="Padrão comercial 28-30°Brix"),
+            "Sauce": dict(density=1.03, confidence="validation_required",
+                          notes="Produto formulado — mais variável"),
+            "Diced": dict(density=1.04, confidence="validation_required",
+                          notes="Pedaços sólidos + líquido — heterogêneo"),
+        },
+    },
+    "DAY": {
+        "Milk Fat": {
+            "AMF": dict(density=0.91, confidence="high_confidence",
+                        notes="Gordura láctea ~99,8% pura, valor bem documentado"),
+        },
+        "Butter": {
+            "Standard": dict(density=0.94, confidence="validation_required",
+                              notes="~80% gordura + água/sólidos do leite — mais variável que AMF"),
+        },
+        "Cheese": {
+            "Block": dict(density=1.09, confidence="high_confidence",
+                          notes="Densidade aparente — Cheddar industrial medido ~1,09-1,094 kg/L"),
+        },
+    },
+    "FAO": {
+        "Palm": {
+            "Oil": dict(density=0.90, confidence="high_confidence", notes="Óleo vegetal — faixa bem documentada (FAO/INFOODS)"),
+        },
+        "Soy": {
+            "Oil": dict(density=0.92, confidence="high_confidence", notes="Óleo vegetal — faixa bem documentada (FAO/INFOODS)"),
+        },
+        "Sunflower": {
+            "Oil": dict(density=0.92, confidence="high_confidence", notes="Óleo vegetal — faixa bem documentada (FAO/INFOODS)"),
+        },
+        "Omega 3": {
+            "Oil": dict(density=0.92, confidence="validation_required",
+                        notes="Óleo de peixe — mesma ordem de grandeza dos vegetais"),
+        },
+        "Lecithin": {
+            "Standard": dict(density=0.98, confidence="validation_required",
+                              notes="Mais viscosa/densa que óleo puro"),
+        },
+    },
+    "MSP": {
+        "Water": {
+            "Standard": dict(density=1.00, confidence="high_confidence", notes="Trivial"),
+        },
+        "Tobacco": {
+            "Baled": dict(density=0.27, confidence="high_confidence",
+                          notes="Densidade aparente de fardo (folha curada compactada), faixa industrial 200-330 kg/m³"),
+        },
+        "Olives": {
+            "In Brine": dict(density=1.02, confidence="validation_required",
+                             notes="Densidade aparente estimada (azeitona+salmoura, sem fonte direta medida — validar com QA)"),
+        },
+        "Gherkins": {
+            "In Brine": dict(density=1.02, confidence="validation_required",
+                             notes="Densidade aparente estimada por analogia a azeitonas — sem fonte direta medida"),
+        },
     },
 }
 
@@ -303,20 +425,28 @@ async def seed_initial_data(db: AsyncSession) -> None:
                 await db.flush()
                 existing_products[key] = prod.id
 
-    existing_types = {
-        (t.product_id, t.type_name): t.id for t in (await db.execute(select(ProductType))).scalars().all()
+    existing_type_rows = {
+        (t.product_id, t.type_name): t for t in (await db.execute(select(ProductType))).scalars().all()
     }
     for category_name, products in PRODUCT_HIERARCHY.items():
         category_id = existing_categories[category_name]
         for product_name, types in products.items():
             product_id = existing_products[(category_id, product_name)]
-            for type_name in types:
+            for type_name, info in types.items():
                 key = (product_id, type_name)
-                if key not in existing_types:
-                    pt = ProductType(product_id=product_id, type_name=type_name)
-                    db.add(pt)
-                    await db.flush()
-                    existing_types[key] = pt.id
+                if key in existing_type_rows:
+                    row = existing_type_rows[key]
+                    row.density_kg_per_liter = info["density"]
+                    row.density_confidence = info["confidence"]
+                    row.notes = info["notes"]
+                else:
+                    db.add(ProductType(
+                        product_id=product_id, type_name=type_name,
+                        density_kg_per_liter=info["density"],
+                        density_confidence=info["confidence"],
+                        notes=info["notes"],
+                    ))
+            await db.flush()
 
     # Accessory types
     existing_acc_types = (await db.execute(select(AccessoryType.accessory_name))).scalars().all()
