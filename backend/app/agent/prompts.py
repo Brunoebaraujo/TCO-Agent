@@ -374,14 +374,8 @@ Gere o resultado em DUAS partes na mesma resposta:
     {"label": "Handling enduser", "goodpack": number, "competitor": number, "goodpack_per_unit": number, "competitor_per_unit": number},
     {"label": "Empty container mgmt", "goodpack": number, "competitor": number, "goodpack_per_unit": number, "competitor_per_unit": number}
   ],
-  "packaging_breakdown": [
-    {"label": "Unit cost", "value": number},
-    {"label": "string — nome do acessório, ex: Aseptic Bag", "value": number}
-  ],
-  "competitor_packaging_breakdown": [
-    {"label": "Unit cost", "value": number},
-    {"label": "string — nome do acessório, ex: Poly Liner", "value": number}
-  ],
+  "packaging_breakdown": [{"label": "Unit cost", "value": number}, {"label": "string (nome do acessório)", "value": number}],
+  "competitor_packaging_breakdown": [{"label": "Unit cost", "value": number}, {"label": "string (nome do acessório)", "value": number}],
   "goodpack_qty_per_unit_kg": number,
   "goodpack_qty_per_transport": number,
   "goodpack_stack_full_warehouse": number,
@@ -432,19 +426,19 @@ dashboard (deixe `null` nas que não são — ex: acessórios, que já têm edi�
 - Frete por container: `transport_cost_per_container`, value_type "number"
 
 Regras importantes para esse bloco:
-- Todos os números são valores numéricos puros (sem símbolo de moeda, sem separador de milhar).
+- Números são valores puros — sem símbolo de moeda, sem separador de milhar.
 - `categories` deve ter exatamente as 5 categorias listadas, na mesma ordem.
-- `goodpack`/`competitor` em cada categoria são custo por MT; `goodpack_per_unit`/`competitor_per_unit` são custo por unidade de embalagem (use 0 se não aplicável, nunca omita o campo).
-- `packaging_breakdown` decompõe a categoria "Packaging" do lado Goodpack em seus componentes individuais (unit cost + cada acessório cobrado, por unidade de embalagem) — a soma de todos os `value` deve ser igual ao `goodpack_per_unit` da categoria "Packaging". `competitor_packaging_breakdown` faz o mesmo para o lado concorrente, usando `competitor_per_unit` da categoria "Packaging" como referência de soma. Isso alimenta o dashboard do vendedor, que mostra os dois lados lado a lado — sem essa decomposição em ambos os lados ele não consegue ver onde vale a pena buscar confirmação/ganho. CADA acessório usado, dos dois lados, deve também ter uma entrada correspondente em `assumptions` (ver seção Acessórios) — não agregue acessórios numa única premissa genérica, e não omita o lado concorrente mesmo que os preços venham todos como estimativa.
-- `goodpack_qty_per_unit_kg`/`competitor_qty_per_unit_kg` é a "Carga real por unidade" calculada na seção Estatísticas logísticas (mínimo entre max_payload_kg e densidade×volume) — não apenas o `max_payload_kg` da SKU/embalagem. O dashboard usa esse número para recalcular logística e custo quando o vendedor edita capacidade/peso/quantidade por container, dos dois lados.
-- `goodpack_qty_per_transport`/`competitor_qty_per_transport`, `goodpack_stack_full_warehouse`/`competitor_stack_full_warehouse`, `goodpack_volume_liters`/`competitor_volume_liters` e `goodpack_max_payload_kg`/`competitor_max_payload_kg` vêm direto do retorno de `calculate_tco` (que por sua vez ecoa o que você passou em `goodpack_specs`/`competitor_specs`) — sempre inclua todos, dos dois lados, para o painel de capacidade/quantidade por container do dashboard funcionar.
-- `goodpack_transport_cost_per_container` é o custo fixo de frete por container (ex: $4.500 por 40ft Reefer), informado pelo vendedor. Necessário para o dashboard recalcular o custo de Transport por MT quando a quantidade envasada por unidade muda — sem esse valor, Transport fica congelado no valor original mesmo quando qty_per_unit muda.
-- `logistics` usa as fórmulas definidas na seção "Estatísticas logísticas" acima. Arredonde todos os valores para inteiros (para cima), exceto `weight_per_container_kg` que pode ter 1 casa decimal.
-- `investment`: omita o bloco inteiro (não inclua a chave) se nenhum investimento foi mencionado pelo vendedor — não invente valores zero como se fossem dados reais. Se incluir, `*_payback_cycles` = investimento ÷ saving total do ciclo correspondente.
-- `assumptions` deve listar TODAS as premissas usadas no cálculo, mesmo as triviais, com o nível de confiança real — incluindo uma entrada por acessório individual.
-- `handling_benchmarks` deve ser exatamente o dict que você passou pra `calculate_tco` (cópia, não invente nada novo) — o dashboard usa isso pra deixar cada parâmetro de handling editável individualmente, em vez de só o total agregado.
-- `override_key`/`value_type`/`current_value`: preencha conforme a tabela acima em toda assumption editável. Isso faz o vendedor conseguir corrigir o valor direto na lista de premissas (botão "Validar" + campo), sem precisar achar onde esse dado fica escondido em outro painel. Premissas sem campo editável correspondente (ex: texto livre, contexto) ficam com os três campos `null`.
-- NUNCA invente esse bloco se não tiver dados suficientes — primeiro pergunte o que falta (ver seção Modo TCO Express para o que é mínimo necessário).
+- `goodpack`/`competitor` em cada categoria são custo por MT; `goodpack_per_unit`/`competitor_per_unit` são custo por unidade (use 0 se não aplicável, nunca omita o campo).
+- `packaging_breakdown`/`competitor_packaging_breakdown` decompõem "Packaging" de cada lado em unit cost + acessórios por unidade — a soma de cada um deve bater com `goodpack_per_unit`/`competitor_per_unit` da categoria "Packaging". Alimenta o dashboard (o vendedor precisa ver os dois lados decompostos pra saber onde buscar confirmação/ganho) — nunca omita o lado concorrente, mesmo com preços estimados. CADA acessório, dos dois lados, tem entrada própria em `assumptions` (não agregue numa premissa genérica).
+- `goodpack_qty_per_unit_kg`/`competitor_qty_per_unit_kg` = "Carga real por unidade" (MÍN entre max_payload_kg e densidade×volume — ver Estatísticas logísticas), não só `max_payload_kg` puro. O dashboard usa isso pra recalcular logística/custo quando o vendedor edita capacidade/peso/qty por container, dos dois lados.
+- `goodpack_qty_per_transport`/`competitor_qty_per_transport`, `goodpack_stack_full_warehouse`/`competitor_stack_full_warehouse`, `goodpack_volume_liters`/`competitor_volume_liters`, `goodpack_max_payload_kg`/`competitor_max_payload_kg` vêm direto de `calculate_tco` (eco de `goodpack_specs`/`competitor_specs`) — inclua todos, dos dois lados, ou o painel de capacidade do dashboard quebra.
+- `goodpack_transport_cost_per_container` = frete fixo por container (ex: $4.500/40ft Reefer), informado pelo vendedor — necessário pro dashboard recalcular Transport $/MT quando qty_per_unit muda (sem ele, Transport fica congelado no valor original).
+- `logistics`: fórmulas da seção Estatísticas logísticas. Arredonde pra cima (inteiro), exceto `weight_per_container_kg` (1 casa decimal).
+- `investment`: omita a chave inteira se não houve menção de investimento pelo vendedor (não invente zero como dado real). Se incluir, `*_payback_cycles` = investimento ÷ saving total do ciclo correspondente.
+- `assumptions`: liste TODAS as premissas usadas (mesmo triviais) com confidence_level real, incluindo uma entrada por acessório individual.
+- `handling_benchmarks`: cópia exata do dict passado pra `calculate_tco` (não invente nada novo) — dashboard usa isso pra editar cada parâmetro individualmente, não só o total agregado.
+- `override_key`/`value_type`/`current_value`: preencha conforme a tabela acima em toda assumption editável — permite corrigir direto na lista de premissas (botão "Validar"), sem caçar o campo em outro painel. Premissas sem edição correspondente ficam com os três campos `null`.
+- NUNCA invente esse bloco sem dados suficientes — pergunte o que falta primeiro (mínimo necessário: ver Modo TCO Express).
 - O JSON deve ser válido e parseável — sem comentários, sem texto extra dentro dos marcadores.
 """
 
