@@ -280,3 +280,39 @@ export function formatOverridesBlock(overrides) {
 
   return `[VALORES CONFIRMADOS NESTA SESSÃO — use estes em vez de buscar benchmark para estes campos específicos:\n${lines.join('\n')}]\n\n`
 }
+
+/**
+ * Formata a lista de acessórios presentes na ÚLTIMA resposta com TCO_RESULT,
+ * dos dois lados, num bloco de texto que vai colado na próxima mensagem ao
+ * agente — ver seção CONFIRMED_OVERRIDES do system prompt.
+ *
+ * Resolve um problema diferente do formatOverridesBlock: aquele protege
+ * VALORES já confirmados de regredir pro benchmark; este protege a
+ * PRESENÇA dos itens em si. calculate_tco não tem memória própria — toda
+ * vez que o agente a chama, reconstrói goodpack_accessories/
+ * competitor_accessories do zero, de memória da conversa. Um pedido
+ * incremental (ex: "adiciona um Pallet no concorrente") pode fazer o
+ * agente esquecer um item que não tinha edição nem fazia parte do pedido
+ * atual, e o item simplesmente some do resultado sem nenhum aviso.
+ *
+ * @param {object|null} lastTcoResult - o tco_result da última mensagem do agente que tiver um, ou null
+ * @returns {string} bloco formatado, ou string vazia se não houver tco_result anterior
+ */
+export function formatPreviousAccessoriesBlock(lastTcoResult) {
+  if (!lastTcoResult) return ''
+
+  const gpItems = (lastTcoResult.packaging_breakdown || [])
+    .filter(item => item.label !== 'Unit cost')
+    .map(item => item.label)
+  const compItems = (lastTcoResult.competitor_packaging_breakdown || [])
+    .filter(item => item.label !== 'Unit cost')
+    .map(item => item.label)
+
+  if (gpItems.length === 0 && compItems.length === 0) return ''
+
+  const lines = []
+  if (gpItems.length > 0) lines.push(`Goodpack: ${gpItems.join(', ')}`)
+  if (compItems.length > 0) lines.push(`Concorrente: ${compItems.join(', ')}`)
+
+  return `[ACESSÓRIOS PRESENTES NA RODADA ANTERIOR — preserve TODOS estes itens em goodpack_accessories/competitor_accessories ao montar a chamada de calculate_tco desta vez, mesmo os que o pedido atual não mencionar. Só remova um item se o vendedor pedir explicitamente:\n${lines.join('\n')}]\n\n`
+}

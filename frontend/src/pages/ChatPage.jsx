@@ -4,7 +4,7 @@ import { Send, Loader2 } from 'lucide-react'
 import TCODashboard from '../components/tco/TCODashboard'
 import PendingPanel from '../components/tco/PendingPanel'
 import ExpressForm from '../components/tco/ExpressForm'
-import { formatOverridesBlock } from '../components/tco/dashboardCalc'
+import { formatOverridesBlock, formatPreviousAccessoriesBlock } from '../components/tco/dashboardCalc'
 
 const WELCOME_MESSAGE = {
   role: 'assistant',
@@ -104,7 +104,9 @@ export default function ChatPage() {
 
     const userMessage = { role: 'user', content: text.trim() }
     const overridesBlock = formatOverridesBlock(overrides)
-    const apiUserMessage = { role: 'user', content: overridesBlock + text.trim() }
+    const lastTcoResult = [...messages].reverse().find(m => m.tco_result)?.tco_result || null
+    const accessoriesBlock = formatPreviousAccessoriesBlock(lastTcoResult)
+    const apiUserMessage = { role: 'user', content: accessoriesBlock + overridesBlock + text.trim() }
     const messagesWithUser = [...messages, userMessage]
     setMessages(messagesWithUser)
     setLoading(true)

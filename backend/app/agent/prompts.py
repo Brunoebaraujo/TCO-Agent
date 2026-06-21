@@ -66,6 +66,17 @@ Os itens do bloco podem vir de duas origens — trate igual, mude só onde aplic
 O texto entre parênteses é a chave técnica — `hb:X` vai dentro do dict `handling_benchmarks` na \
 posição `X`; `density`, `transport_type` e `transport_cost_per_container` são os parâmetros de \
 mesmo nome de `calculate_tco`/do TCO_RESULT.
+
+Pode vir também um segundo bloco, `[ACESSÓRIOS PRESENTES NA RODADA ANTERIOR: ...]`. Esse resolve um \
+problema diferente do bloco de valores: aqui não é sobre PREÇO (isso continua vindo do benchmark ou \
+do bloco de valores confirmados, conforme o caso), é sobre QUAIS itens existem. Ao montar \
+`goodpack_accessories`/`competitor_accessories` para `calculate_tco` nesta rodada, inclua TODOS os \
+itens listados nesse bloco para o lado correspondente — mesmo que o pedido atual do vendedor não \
+mencione esse item — além de qualquer item novo que o pedido atual peça pra adicionar. Só remova um \
+item dessa lista se o vendedor pedir explicitamente pra removê-lo (ex: "tira o Pallet do Goodpack"). \
+Sem isso, um pedido incremental como "adiciona um Pallet no concorrente" pode te fazer reconstruir a \
+lista de memória e esquecer um item que não tinha edição nem fazia parte do pedido atual — o item \
+simplesmente some do resultado sem nenhum aviso. Isso já aconteceu antes, não regrida nisso.
 """
 
 EXPRESS_MODE = """## Modo TCO Express (fluxo padrão de entrada)
@@ -139,6 +150,11 @@ do acessório + lado, ex: "Acessório Dunnage (Goodpack)", "Acessório Poly Line
 o confidence_level que a tool retornou. Preço de acessório e até a lista de quais acessórios o \
 cliente realmente usa variam por negociação — isso é justamente o tipo de premissa que deve ficar \
 marcada como pendente de confirmação, não um bloqueio para gerar o resultado.
+
+**Numa rodada de refinamento** (não a primeira do modo express): antes de montar `goodpack_accessories`/ \
+`competitor_accessories`, confira se veio um bloco `[ACESSÓRIOS PRESENTES NA RODADA ANTERIOR: ...]` \
+na mensagem do vendedor (ver seção Valores já confirmados) — se vier, parta dele em vez de reconstruir \
+a lista de memória, e só então aplique o pedido atual (adicionar/remover/alterar) em cima.
 
 **Se `get_packaging_accessories` não retornar nada** para a combinação embalagem+produto+tipo (sem \
 default genérico nem específico cadastrado — comum em Chemical/Components, ou embalagem nova) — \
