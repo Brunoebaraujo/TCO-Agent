@@ -31,6 +31,11 @@ _MSG_GENERIC = (
     "⚠️ Erro inesperado ao chamar o agente. Tente novamente em alguns instantes. "
     "Se o problema persistir, avise o administrador do sistema."
 )
+_MSG_TRUNCATED = (
+    "⚠️ A resposta ficou maior do que o esperado e foi cortada antes de terminar "
+    "(geralmente acontece quando há muitas premissas pra listar de uma vez). "
+    "Pode mandar de novo — \"continue\" ou repetir o pedido — que normalmente resolve na segunda tentativa."
+)
 
 
 async def ask_agent(messages: list[dict], db: AsyncSession) -> str:
@@ -53,11 +58,18 @@ async def ask_agent(messages: list[dict], db: AsyncSession) -> str:
         for _ in range(MAX_TOOL_ROUNDS):
             response = await client.messages.create(
                 model=settings.claude_model,
-                max_tokens=4096,
+                max_tokens=8192,
                 system=SYSTEM_PROMPT,
                 messages=conversation,
                 tools=TOOLS,
             )
+
+            if response.stop_reason == "max_tokens":
+                # Resposta cortada pela API antes de terminar — não confiamos no
+                # texto parcial (pode ter um TCO_RESULT com categoria faltando,
+                # o que o reparo heurístico do tco_parser não detectaria como erro).
+                # Descartamos e pedimos pro vendedor tentar de novo.
+                return _MSG_TRUNCATED
 
             if response.stop_reason != "tool_use":
                 text_blocks = [block.text for block in response.content if block.type == "text"]
