@@ -12,7 +12,7 @@ export default function AccessoriesTab() {
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState(null)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [form, setForm] = useState({ accessory_type_id: '', category_id: '', product_id: '', product_type_id: '', default_unit_price: '' })
+  const [form, setForm] = useState({ accessory_type_id: '', category_id: '', product_id: '', product_type_id: '', default_unit_price: '', region: 'GLOBAL', source_detail: '' })
   const [showAddPackagingForm, setShowAddPackagingForm] = useState(false)
   const [newPackagingForm, setNewPackagingForm] = useState({ type: 'goodpack', name: '' })
 
@@ -115,12 +115,13 @@ export default function AccessoriesTab() {
         accessory_type_id: parseInt(form.accessory_type_id),
         default_unit_price: form.default_unit_price ? parseFloat(form.default_unit_price) : null,
         confidence_level: form.default_unit_price ? 'verified' : 'validation_required',
+        region: form.region || 'GLOBAL',
         source_type: 'interno',
-        source_detail: 'Adicionado manualmente via Knowledge Base',
+        source_detail: form.source_detail || 'Adicionado manualmente via Knowledge Base',
       }),
     })
     setShowAddForm(false)
-    setForm({ accessory_type_id: '', category_id: '', product_id: '', product_type_id: '', default_unit_price: '' })
+    setForm({ accessory_type_id: '', category_id: '', product_id: '', product_type_id: '', default_unit_price: '', region: 'GLOBAL', source_detail: '' })
     reload()
   }
 
@@ -303,6 +304,31 @@ export default function AccessoriesTab() {
                   className="w-28 px-2 py-1.5 text-sm border border-slate-200 rounded-md"
                 />
               </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Região</label>
+                <select
+                  value={form.region}
+                  onChange={e => setForm(f => ({ ...f, region: e.target.value }))}
+                  className="px-2 py-1.5 text-sm border border-slate-200 rounded-md"
+                >
+                  <option value="GLOBAL">Global</option>
+                  <option value="BRAZIL">Brasil</option>
+                  <option value="LATAM">América Latina</option>
+                  <option value="NAMERICA">América do Norte</option>
+                  <option value="EUROPE">Europa</option>
+                  <option value="ASIA">Ásia</option>
+                </select>
+              </div>
+              <div className="flex-1 min-w-[160px]">
+                <label className="block text-xs text-slate-400 mb-1">Fonte (opcional)</label>
+                <input
+                  type="text"
+                  value={form.source_detail}
+                  onChange={e => setForm(f => ({ ...f, source_detail: e.target.value }))}
+                  placeholder="Ex: informado pelo cliente X"
+                  className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-md"
+                />
+              </div>
               <button
                 onClick={handleAddAccessory}
                 className="px-3 py-1.5 text-sm bg-[#1a3a5c] text-white rounded-md hover:bg-[#1a3a5c]/90"
@@ -371,6 +397,14 @@ function AccessoryList({ items, editingId, setEditingId, onSavePrice, onDelete, 
                 <span className="text-slate-700">
                   {item.default_unit_price != null ? `$${item.default_unit_price.toFixed(2)}` : '— sem preço —'}
                 </span>
+                {item.region && item.region !== 'GLOBAL' && (
+                  <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-1.5 py-0.5 rounded">
+                    {item.region}
+                  </span>
+                )}
+                {item.source_detail && (
+                  <span className="text-xs text-slate-400" title={item.source_detail}>·</span>
+                )}
                 <button onClick={() => { setEditingId(item.id); setTempPrice('') }} className="text-slate-300 hover:text-slate-500">
                   <Pencil size={13} />
                 </button>

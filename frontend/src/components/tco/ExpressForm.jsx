@@ -34,6 +34,7 @@ export default function ExpressForm({ onSubmit, loading }) {
     precoConcorrente: '',
     frete: '',
     volume: '',
+    regional: 'GLOBAL',
   })
 
   useEffect(() => {
@@ -76,6 +77,7 @@ export default function ExpressForm({ onSubmit, loading }) {
 
   const isComplete = Object.entries(form).every(([key, v]) => {
     if (key === 'produtoIndex') return v !== ''
+    if (key === 'regional') return true
     return String(v).trim() !== ''
   })
 
@@ -97,6 +99,7 @@ export default function ExpressForm({ onSubmit, loading }) {
       `Frete por container: ${form.frete}`,
       `Volume total: ${form.volume} MT`,
       `Lease days: ${form.leaseDays}`,
+      `Regional: ${form.regional}`,
     ].join('\n')
 
     onSubmit(message)
@@ -178,6 +181,17 @@ export default function ExpressForm({ onSubmit, loading }) {
         <div>
           <label className={labelClass}>Volume total (MT)</label>
           <input type="number" step="1" className={inputClass} value={form.volume} onChange={e => update('volume', e.target.value)} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelClass}>Regional</label>
+          <select className={inputClass} value={form.regional} onChange={e => update('regional', e.target.value)}>
+            <option value="GLOBAL">Global</option>
+            <option value="BRAZIL">Brasil</option>
+            <option value="LATAM">América Latina</option>
+            <option value="NAMERICA">América do Norte</option>
+            <option value="EUROPE">Europa</option>
+            <option value="ASIA">Ásia</option>
+          </select>
         </div>
       </div>
 

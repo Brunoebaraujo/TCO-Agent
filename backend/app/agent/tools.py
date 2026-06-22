@@ -309,30 +309,44 @@ async def execute_tool(db: AsyncSession, tool_name: str, tool_input: dict) -> di
             return {"error": f"Embalagem '{tool_input['name']}' não encontrada na base."}
 
         is_goodpack = tool_input["packaging_type"] == "goodpack"
-        query = select(PackagingAccessory).where(PackagingAccessory.is_current == True)
-        query = query.where(
+        pkg_filter = (
             PackagingAccessory.goodpack_sku_id == obj.id if is_goodpack
             else PackagingAccessory.competitor_unit_id == obj.id
         )
-        items = (await db.execute(query)).scalars().all()
+        items = (await db.execute(
+            select(PackagingAccessory).where(PackagingAccessory.is_current == True).where(pkg_filter)
+        )).scalars().all()
 
         accessory_names = {a.id: a.accessory_name for a in (await db.execute(select(AccessoryType))).scalars().all()}
         product_types = {t.id: t for t in (await db.execute(select(ProductType))).scalars().all()}
         products = {p.id: p for p in (await db.execute(select(Product))).scalars().all()}
 
-        results = []
+        # Regional fallback: prefere registro da região solicitada; cai para GLOBAL.
+        from collections import defaultdict
+        region = (tool_input.get("region") or "GLOBAL").upper()
+        grouped = defaultdict(list)
         for item in items:
+            grouped[(item.accessory_type_id, item.product_type_id)].append(item)
+
+        results = []
+        for (acc_type_id, pt_id), candidates in grouped.items():
+            chosen = (
+                next((c for c in candidates if (c.region or "GLOBAL").upper() == region), None)
+                or next((c for c in candidates if (c.region or "GLOBAL").upper() == "GLOBAL"), None)
+                or candidates[0]
+            )
             label = None
-            if item.product_type_id and item.product_type_id in product_types:
-                pt = product_types[item.product_type_id]
+            if pt_id and pt_id in product_types:
+                pt = product_types[pt_id]
                 product = products.get(pt.product_id)
                 label = f"{product.product_name if product else '?'} / {pt.type_name}"
             results.append({
-                "accessory_name": accessory_names.get(item.accessory_type_id, "?"),
+                "accessory_name": accessory_names.get(acc_type_id, "?"),
                 "specific_to_product_type": label,
-                "default_unit_price": float(item.default_unit_price) if item.default_unit_price else None,
-                "confidence_level": item.confidence_level,
-                "currency": item.currency,
+                "default_unit_price": float(chosen.default_unit_price) if chosen.default_unit_price else None,
+                "confidence_level": chosen.confidence_level,
+                "currency": chosen.currency,
+                "region": chosen.region or "GLOBAL",
             })
         return {"accessories": results}
 
