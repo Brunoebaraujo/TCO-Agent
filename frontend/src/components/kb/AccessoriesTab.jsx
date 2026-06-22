@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Loader2, Pencil } from 'lucide-react'
+import { Plus, Loader2, Pencil, Trash2 } from 'lucide-react'
 import ConfidenceBadge from '../ui/ConfidenceBadge'
 
 export default function AccessoriesTab() {
@@ -121,6 +121,12 @@ export default function AccessoriesTab() {
     })
     setShowAddForm(false)
     setForm({ accessory_type_id: '', category_id: '', product_id: '', product_type_id: '', default_unit_price: '' })
+    reload()
+  }
+
+  async function handleDeleteAccessory(itemId, accessoryName) {
+    if (!window.confirm(`Remover "${accessoryName}" desta embalagem?\n\nEsta ação não afeta TCOs já calculados.`)) return
+    await fetch(`/api/kb/packaging-accessories/${itemId}`, { method: 'DELETE' })
     reload()
   }
 
@@ -307,12 +313,12 @@ export default function AccessoriesTab() {
           )}
 
           <p className="text-xs text-slate-400 mb-2">Default (qualquer produto)</p>
-          <AccessoryList items={genericItems} editingId={editingId} setEditingId={setEditingId} onSavePrice={handleSavePrice} />
+          <AccessoryList items={genericItems} editingId={editingId} setEditingId={setEditingId} onSavePrice={handleSavePrice} onDelete={handleDeleteAccessory} />
 
           {specializedItems.length > 0 && (
             <>
               <p className="text-xs text-slate-400 mb-2 mt-4">Específico por produto/tipo</p>
-              <AccessoryList items={specializedItems} editingId={editingId} setEditingId={setEditingId} onSavePrice={handleSavePrice} showProductType />
+              <AccessoryList items={specializedItems} editingId={editingId} setEditingId={setEditingId} onSavePrice={handleSavePrice} onDelete={handleDeleteAccessory} showProductType />
             </>
           )}
 
@@ -325,7 +331,7 @@ export default function AccessoriesTab() {
   )
 }
 
-function AccessoryList({ items, editingId, setEditingId, onSavePrice, showProductType }) {
+function AccessoryList({ items, editingId, setEditingId, onSavePrice, onDelete, showProductType }) {
   const [tempPrice, setTempPrice] = useState('')
 
   if (items.length === 0) {
@@ -371,6 +377,13 @@ function AccessoryList({ items, editingId, setEditingId, onSavePrice, showProduc
               </>
             )}
             <ConfidenceBadge level={item.confidence_level} />
+            <button
+              onClick={() => onDelete(item.id, item.accessory_name)}
+              className="text-slate-200 hover:text-red-400 transition-colors ml-1"
+              title="Remover acessório"
+            >
+              <Trash2 size={13} />
+            </button>
           </div>
         </div>
       ))}
