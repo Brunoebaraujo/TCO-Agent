@@ -233,7 +233,35 @@ def calculate_tco(
         competitor_specs.get("stack_full_warehouse"), competitor_specs.get("tare_weight_kg"),
     )
 
+    # Subtotals: separa embalagem+frete do handling para uso no gráfico e PPTX.
+    # Handling diferenciado por SKU está previsto para onda futura; por ora o
+    # mesmo benchmark é aplicado aos dois lados.
+    gp_packaging_freight_per_mt = round(
+        per_mt(gp_packaging_per_unit, gp_qty_kg) + per_mt(gp_transport_per_unit, gp_qty_kg), 4
+    )
+    comp_packaging_freight_per_mt = round(
+        per_mt(comp_packaging_per_unit, comp_qty_kg) + per_mt(comp_transport_per_unit, comp_qty_kg), 4
+    )
+    gp_handling_per_mt = round(
+        per_mt(handling_packer_per_unit, gp_qty_kg) + per_mt(handling_enduser_per_unit, gp_qty_kg), 4
+    )
+    comp_handling_per_mt = round(
+        per_mt(comp_handling_packer_per_unit, comp_qty_kg) + per_mt(comp_handling_enduser_per_unit, comp_qty_kg), 4
+    )
+
+    subtotals = {
+        "goodpack": {
+            "packaging_and_freight": gp_packaging_freight_per_mt,
+            "handling": gp_handling_per_mt,
+        },
+        "competitor": {
+            "packaging_and_freight": comp_packaging_freight_per_mt,
+            "handling": comp_handling_per_mt,
+        },
+    }
+
     result = {
+        "subtotals": subtotals,
         "categories": categories,
         "packaging_breakdown": gp_breakdown,
         "competitor_packaging_breakdown": comp_breakdown,
