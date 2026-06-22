@@ -151,6 +151,64 @@ export default function ChatPage() {
   // Formulário express só aparece numa análise nova, antes de qualquer
   // mensagem trocada — depois da primeira resposta, segue como chat normal
   // (refinamento, perguntas de acompanhamento, customização completa via texto).
+  const handleExpressSubmit = async (formData) => {
+    if (loading) return
+    // Mostra mensagem do usuário imediatamente
+    const userMessage = {
+      role: 'user',
+      content: [
+        `SKU Goodpack: ${formData.goodpackSku}`,
+        `Concorrente: ${formData.competitorName}`,
+        `Produto: ${formData.productName}${formData.typeName ? ' — ' + formData.typeName : ''}`,
+        `Origem: ${formData.origin} → Destino: ${formData.destination}`,
+        `Volume: ${formData.volumeMt} MT | Lease: ${formData.leaseDays} dias | Regional: ${formData.regional}`,
+        `Preço Goodpack: $${formData.goodpackUnitPrice}/un | Preço concorrente: $${formData.competitorUnitPrice}/un`,
+        `Frete: $${formData.freightPerContainer}`,
+      ].join('\n'),
+    }
+    const messagesWithUser = [...messages, userMessage]
+    setMessages(messagesWithUser)
+    setLoading(true)
+
+    try {
+      const res = await fetch('/api/agent/chat-express', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          goodpack_sku: formData.goodpackSku,
+          competitor_name: formData.competitorName,
+          product_name: formData.productName,
+          type_name: formData.typeName || null,
+          origin: formData.origin,
+          destination: formData.destination,
+          goodpack_unit_price: parseFloat(formData.goodpackUnitPrice),
+          competitor_unit_price: parseFloat(formData.competitorUnitPrice),
+          freight_per_container: parseFloat(formData.freightPerContainer),
+          volume_mt: parseFloat(formData.volumeMt),
+          lease_days: parseInt(formData.leaseDays),
+          region: formData.regional || 'GLOBAL',
+        }),
+      })
+      const data = await res.json()
+      const assistantMessage = {
+        role: 'assistant',
+        content: data.content,
+        tco_result: data.tco_result ?? null,
+        pending_text: data.pending_text ?? null,
+      }
+      const finalMessages = [...messagesWithUser, assistantMessage]
+      setMessages(finalMessages)
+      await persistSession(finalMessages, sessionId)
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '⚠️ Erro ao conectar com o agente. Verifique se o backend está rodando.',
+      }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const showExpressForm = !sessionId && messages.length === 1
 
   if (loadingSession) {
@@ -175,7 +233,7 @@ export default function ChatPage() {
 
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
         {showExpressForm && (
-          <ExpressForm onSubmit={submitUserMessage} loading={loading} />
+          <ExpressForm onSubmit={handleExpressSubmit} loading={loading} />
         )}
 
         {messages.map((msg, i) => (

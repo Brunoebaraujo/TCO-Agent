@@ -86,23 +86,21 @@ export default function ExpressForm({ onSubmit, loading }) {
     if (!isComplete || loading) return
 
     const produto = productOptions[Number(form.produtoIndex)]
-    const produtoText = produto?.type ? `${produto.product} (tipo: ${produto.type})` : produto?.product ?? ''
 
-    const message = [
-      `SKU Goodpack: ${form.skuGoodpack}`,
-      `SKU concorrente: ${form.skuConcorrente}`,
-      `Produto: ${produtoText}`,
-      `Origem: ${form.origem}`,
-      `Destino: ${form.destino}`,
-      `Preço Goodpack: ${form.precoGoodpack} por unidade`,
-      `Preço concorrente: ${form.precoConcorrente} por unidade`,
-      `Frete por container: ${form.frete}`,
-      `Volume total: ${form.volume} MT`,
-      `Lease days: ${form.leaseDays}`,
-      `Regional: ${form.regional}`,
-    ].join('\n')
-
-    onSubmit(message)
+    onSubmit({
+      goodpackSku: form.skuGoodpack,
+      competitorName: form.skuConcorrente,
+      productName: produto?.product ?? '',
+      typeName: produto?.type ?? null,
+      origin: form.origem,
+      destination: form.destino,
+      goodpackUnitPrice: form.precoGoodpack,
+      competitorUnitPrice: form.precoConcorrente,
+      freightPerContainer: form.frete,
+      volumeMt: form.volume,
+      leaseDays: form.leaseDays,
+      regional: form.regional || 'GLOBAL',
+    })
   }
 
   if (loadingOptions) {
