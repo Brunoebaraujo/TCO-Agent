@@ -52,6 +52,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
   // Volume e peso nominal são specs de catálogo fixas, não editáveis aqui.
   const [goodpackQtyPerTransport, setGoodpackQtyPerTransport] = useState(null)
   const [competitorQtyPerTransport, setCompetitorQtyPerTransport] = useState(null)
+  const [roadWeightLimit, setRoadWeightLimit] = useState(23000)
 
   // Quando um TCO_RESULT NOVO chega (o agente recalculou), reaplica por cima
   // dele qualquer valor que o vendedor já tinha confirmado nesta sessão —
@@ -86,6 +87,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
 
     setGoodpackQtyPerTransport(ov('goodpackQtyPerTransport', result?.goodpack_qty_per_transport ?? null))
     setCompetitorQtyPerTransport(ov('competitorQtyPerTransport', result?.competitor_qty_per_transport ?? null))
+    setRoadWeightLimit(ov('roadWeightLimit', 23000))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result])
 
@@ -119,7 +121,8 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     const gpQtyRatio = gpQtyChanged && origGpQtyKg ? origGpQtyKg / effectiveGpQty : 1
 
     const recalcedByQtyGoodpack = gpQtyChanged && effectiveGpQty
-      ? recalcCategoriesByQty(categories, 'goodpack', effectiveGpQty, origGpQtyKg, gpQtyPerTransport, effectiveTransportCost)
+      ? recalcCategoriesByQty(categories, 'goodpack', effectiveGpQty, origGpQtyKg, gpQtyPerTransport, effectiveTransportCost,
+          breakdown.reduce((s, i) => s + (Number(i.value) || 0), 0) || null)
       : null
 
     // --- Lado Concorrente: mesmo padrão do Goodpack — campo direto de
@@ -131,7 +134,8 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     const compStackFullWarehouse = result?.competitor_stack_full_warehouse ?? null
 
     const recalcedByQtyCompetitor = compQtyChanged && effectiveCompQty
-      ? recalcCategoriesByQty(categories, 'competitor', effectiveCompQty, origCompQtyKg, compQtyPerTransport, effectiveTransportCost)
+      ? recalcCategoriesByQty(categories, 'competitor', effectiveCompQty, origCompQtyKg, compQtyPerTransport, effectiveTransportCost,
+          competitorBreakdown.reduce((s, i) => s + (Number(i.value) || 0), 0) || null)
       : null
 
     // Cada categoria com preço editável é recalculada pelo preço e depois
@@ -286,6 +290,10 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     setCompetitorQtyPerTransport(newValue)
     onOverrideChange('competitorQtyPerTransport', newValue, 'Quantidade concorrente por container')
   }
+  function handleRoadWeightLimitChange(newValue) {
+    setRoadWeightLimit(newValue)
+    onOverrideChange('roadWeightLimit', newValue, 'Limite de rodagem (kg)')
+  }
 
   // --- Validação inline na lista de premissas (assumptions[].override_key) ---
   function handleHandlingParamChange(paramKey, newValue) {
@@ -320,6 +328,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     setTransportCostPerContainer(result?.goodpack_transport_cost_per_container ?? null)
     setGoodpackQtyPerTransport(result?.goodpack_qty_per_transport ?? null)
     setCompetitorQtyPerTransport(result?.competitor_qty_per_transport ?? null)
+    setRoadWeightLimit(23000)
     onOverrideChange(null, null) // sinaliza pro pai limpar todas as correções confirmadas desta análise
   }
 
@@ -550,6 +559,18 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
           <div className="bg-slate-50 rounded-lg p-3.5">
             <p className="text-xs font-medium text-slate-700">Capacidade & quantidade por container</p>
             <p className="text-[11px] text-slate-400 mb-2">Editável — afeta logística e custo dos dois lados</p>
+
+            {/* Limite de rodagem */}
+            <div className="flex items-center justify-between mb-2.5">
+              <label className="text-[11px] text-slate-500">Limite rodagem (kg)</label>
+              <input
+                type="number" step="100"
+                value={roadWeightLimit}
+                onChange={(e) => handleRoadWeightLimitChange(parseInt(e.target.value) || 23000)}
+                className="w-[70px] text-xs border border-amber-200 bg-amber-50 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-amber-300 text-right"
+              />
+            </div>
+
             <div className="grid grid-cols-[1fr_70px_70px] gap-x-1.5 gap-y-1 items-center text-[10px] text-slate-400 mb-1">
               <span></span>
               <span className="text-center">GP</span>
@@ -573,24 +594,64 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
               </div>
               <div className="grid grid-cols-[1fr_70px_70px] gap-x-1.5 items-center">
                 <label className="text-[11px] text-slate-500">Qtd./container</label>
-                <input
-                  type="number" step="1"
-                  value={goodpackQtyPerTransport ?? ''}
-                  onChange={(e) => handleGoodpackQtyPerTransportChange(parseInt(e.target.value) || 0)}
-                  className="w-full text-xs border border-blue-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-right"
-                />
-                <input
-                  type="number" step="1"
-                  value={competitorQtyPerTransport ?? ''}
-                  onChange={(e) => handleCompetitorQtyPerTransportChange(parseInt(e.target.value) || 0)}
-                  className="w-full text-xs border border-blue-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-right"
-                />
+                {(() => {
+                  const gpTare = result?.goodpack_tare_weight_kg ?? null
+                  const compTare = result?.competitor_tare_weight_kg ?? null
+                  const gpSuggested = (gpTare != null && qtyPerUnit)
+                    ? Math.floor(roadWeightLimit / (qtyPerUnit + gpTare))
+                    : null
+                  const compSuggested = (compTare != null && competitorQtyPerUnit)
+                    ? Math.floor(roadWeightLimit / (competitorQtyPerUnit + compTare))
+                    : null
+                  const gpTotalWeight = (qtyPerUnit != null && gpTare != null && goodpackQtyPerTransport != null)
+                    ? (qtyPerUnit + gpTare) * goodpackQtyPerTransport
+                    : null
+                  const compTotalWeight = (competitorQtyPerUnit != null && compTare != null && competitorQtyPerTransport != null)
+                    ? (competitorQtyPerUnit + compTare) * competitorQtyPerTransport
+                    : null
+                  const gpOverLimit = gpTotalWeight != null && gpTotalWeight > roadWeightLimit
+                  const compOverLimit = compTotalWeight != null && compTotalWeight > roadWeightLimit
+
+                  return (
+                    <>
+                      <input
+                        type="number" step="1"
+                        value={goodpackQtyPerTransport ?? ''}
+                        placeholder={gpSuggested != null ? String(gpSuggested) : ''}
+                        onChange={(e) => handleGoodpackQtyPerTransportChange(parseInt(e.target.value) || 0)}
+                        className="w-full text-xs border border-blue-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-right"
+                      />
+                      <input
+                        type="number" step="1"
+                        value={competitorQtyPerTransport ?? ''}
+                        placeholder={compSuggested != null ? String(compSuggested) : ''}
+                        onChange={(e) => handleCompetitorQtyPerTransportChange(parseInt(e.target.value) || 0)}
+                        className="w-full text-xs border border-blue-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-right"
+                      />
+                      {/* Peso total por container */}
+                      <label className="text-[11px] text-slate-400 col-start-1">Peso total/container (kg)</label>
+                      <span className={`text-[11px] text-right font-medium ${gpOverLimit ? 'text-red-500' : 'text-slate-600'}`}>
+                        {gpTotalWeight != null ? Math.round(gpTotalWeight).toLocaleString('en-US') : '—'}
+                      </span>
+                      <span className={`text-[11px] text-right font-medium ${compOverLimit ? 'text-red-500' : 'text-slate-600'}`}>
+                        {compTotalWeight != null ? Math.round(compTotalWeight).toLocaleString('en-US') : '—'}
+                      </span>
+                      {/* Avisos de sobrepeso */}
+                      {(gpOverLimit || compOverLimit) && (
+                        <p className="col-span-3 text-[10px] text-red-500 mt-0.5">
+                          ⚠ Peso acima do limite de rodagem ({roadWeightLimit.toLocaleString('en-US')} kg)
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             </div>
             <p className="text-[10px] text-slate-400 mt-2">
               Volume e peso nominal não aparecem aqui — são specs de catálogo fixas, não variam por negócio.
             </p>
           </div>
+
 
           <div className="bg-slate-50 rounded-lg p-3.5">
             <p className="text-xs font-medium text-slate-700 mb-2.5">Demais categorias</p>

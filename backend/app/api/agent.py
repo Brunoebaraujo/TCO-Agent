@@ -223,6 +223,10 @@ Gere a resposta agora."""
             tco_result.setdefault("subtotals", engine.get("subtotals"))
             tco_result.setdefault("categories", engine.get("categories"))
             tco_result.setdefault("logistics", engine.get("logistics"))
+            # Pesos tara — já vêm do engine com os nomes corretos; a injeção
+            # via setdefault garante que estejam presentes mesmo se o LLM omitir.
+            tco_result.setdefault("gp_tare_weight_kg", r.get("gp_tare_weight_kg"))
+            tco_result.setdefault("competitor_tare_weight_kg", r.get("comp_tare_weight_kg"))
 
         return {
             "role": "assistant",

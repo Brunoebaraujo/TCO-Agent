@@ -267,6 +267,8 @@ async def resolve_express(
             "comp_accessories": comp_accessories,
             "gp_qty_transport": gp_qty_transport,
             "comp_qty_transport": comp_qty_transport,
+            "gp_tare_weight_kg": gp_specs.get("tare_weight_kg"),
+            "comp_tare_weight_kg": comp_specs.get("tare_weight_kg"),
         },
         "warnings": warnings,
     }

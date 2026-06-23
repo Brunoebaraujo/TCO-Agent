@@ -103,7 +103,26 @@ export function computeQtyRealPerUnitKg(maxPayloadKg, densityKgPerLiter, volumeL
  * @param {number} qtyPerTransport
  * @param {number} transportCostPerContainer
  */
-export function recalcCategoriesByQty(categories, side, newQtyKg, origQtyKg, qtyPerTransport, transportCostPerContainer) {
+/**
+ * Recalcula $/MT de todas as categorias de UM lado (goodpack ou competitor)
+ * quando a qty real por unidade daquele lado muda (por edição direta de
+ * "Quantidade envasada", ou por edição de Volume/Peso nominal que altera a
+ * qty real calculada).
+ *
+ * Packaging usa fórmula direta (per_unit × 1000 / newQtyKg) para não
+ * ampliar erros de arredondamento do valor original gerado pelo LLM.
+ * Demais categorias usam proporção (origQty / newQty) — o per_unit delas
+ * não é editável diretamente no dashboard.
+ *
+ * @param {Array} categories
+ * @param {'goodpack'|'competitor'} side
+ * @param {number} newQtyKg
+ * @param {number} origQtyKg
+ * @param {number} qtyPerTransport
+ * @param {number} transportCostPerContainer
+ * @param {number|null} packagingPerUnit - soma do breakdown (per_unit real), usado para Packaging
+ */
+export function recalcCategoriesByQty(categories, side, newQtyKg, origQtyKg, qtyPerTransport, transportCostPerContainer, packagingPerUnit = null) {
   const ratio = (origQtyKg && newQtyKg) ? origQtyKg / newQtyKg : 1
   const result = {}
 
@@ -116,6 +135,9 @@ export function recalcCategoriesByQty(categories, side, newQtyKg, origQtyKg, qty
       } else {
         result[cat.label] = { perMt: original * ratio }
       }
+    } else if (cat.label === 'Packaging' && packagingPerUnit != null && newQtyKg > 0) {
+      // Fórmula direta: evita ampliar erros do valor original gerado pelo LLM
+      result[cat.label] = { perMt: (packagingPerUnit * 1000) / newQtyKg }
     } else {
       result[cat.label] = { perMt: original * ratio }
     }
