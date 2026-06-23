@@ -145,15 +145,17 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
     if (hasEditableBreakdown || hasEditableCompetitorBreakdown) {
       categoryOverrides.Packaging = categoryOverrides.Packaging || {}
       if (hasEditableBreakdown) {
-        const pkg = recalcPackagingByPrice(breakdown, originalPackagingPerUnit, originalPackagingPerMt)
-        categoryOverrides.Packaging.perMt = pkg.perMt * gpQtyRatio
+        const newPerUnit = breakdown.reduce((s, i) => s + (Number(i.value) || 0), 0)
+        // Fórmula direta: evita ampliar erros do perMt original gerado pelo LLM
+        categoryOverrides.Packaging.perMt = effectiveGpQty > 0
+          ? (newPerUnit * 1000) / effectiveGpQty
+          : recalcPackagingByPrice(breakdown, originalPackagingPerUnit, originalPackagingPerMt).perMt
       }
       if (hasEditableCompetitorBreakdown) {
-        const compPkg = recalcPackagingByPrice(
-          competitorBreakdown, originalCompetitorPackagingPerUnit, originalCompetitorPackagingPerMt
-        )
-        const compRatio = compQtyChanged && origCompQtyKg ? origCompQtyKg / effectiveCompQty : 1
-        categoryOverrides.Packaging.competitorPerMt = compPkg.perMt * compRatio
+        const newCompPerUnit = competitorBreakdown.reduce((s, i) => s + (Number(i.value) || 0), 0)
+        categoryOverrides.Packaging.competitorPerMt = effectiveCompQty > 0
+          ? (newCompPerUnit * 1000) / effectiveCompQty
+          : recalcPackagingByPrice(competitorBreakdown, originalCompetitorPackagingPerUnit, originalCompetitorPackagingPerMt).perMt
       }
     }
 
