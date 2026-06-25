@@ -536,20 +536,24 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
                   </button>
                 )}
               </div>
+            )
+          })()}
 
-              {/* Somatório e $/MT calculados diretamente dos campos acima */}
-              <div className="mt-2 pt-2 border-t border-slate-200 grid grid-cols-[1fr_56px_56px] gap-x-1.5 items-center">
+          {/* Somatório e $/MT calculados diretamente dos campos acima */}
+          {(hasEditableBreakdown || hasEditableCompetitorBreakdown) && (
+            <div className="bg-slate-50 rounded-lg p-3.5 pt-2">
+              <div className="grid grid-cols-[1fr_56px_56px] gap-x-1.5 items-center mb-1">
                 <span className="text-[11px] font-medium text-slate-600">Total emb. + acess.</span>
                 <span className="text-[11px] font-medium text-slate-800 text-right">{gpBreakdownSum > 0 ? gpBreakdownSum.toFixed(2) : "—"}</span>
                 <span className="text-[11px] font-medium text-slate-800 text-right">{compBreakdownSum > 0 ? compBreakdownSum.toFixed(2) : "—"}</span>
               </div>
-              <div className="mt-1 grid grid-cols-[1fr_56px_56px] gap-x-1.5 items-center">
-                <span className="text-[11px] text-slate-500">$/MT (÷ peso envasado)</span>
+              <div className="grid grid-cols-[1fr_56px_56px] gap-x-1.5 items-center">
+                <span className="text-[11px] text-slate-500">$/MT</span>
                 <span className="text-[11px] font-semibold text-blue-700 text-right">{gpPackagingPerMt > 0 ? gpPackagingPerMt.toFixed(2) : "—"}</span>
                 <span className="text-[11px] font-semibold text-blue-700 text-right">{compPackagingPerMt > 0 ? compPackagingPerMt.toFixed(2) : "—"}</span>
               </div>
-            )
-          })()}
+            </div>
+          )}
 
           <div className="bg-slate-50 rounded-lg p-3.5">
             <p className="text-xs font-medium text-slate-700">Capacidade & quantidade por container</p>
