@@ -112,7 +112,12 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
 
   const recalculated = useMemo(() => {
     // --- Lado Goodpack ---
-    const origGpQtyKg = result?.goodpack_qty_per_unit_kg ?? null
+    // goodpack_qty_per_unit_kg pode nao vir no result (fluxo chat normal).
+    // Fallback: deriva de per_unit / (perMt/1000) — inverso da formula do engine.
+    const origGpQtyKg = result?.goodpack_qty_per_unit_kg
+      ?? (originalPackagingPerUnit && originalPackagingPerMt
+          ? (originalPackagingPerUnit * 1000) / originalPackagingPerMt
+          : null)
     const effectiveGpQty = hasEditableQty ? qtyPerUnit : origGpQtyKg
     const gpQtyChanged = hasEditableQty && effectiveGpQty !== origGpQtyKg
     const gpQtyPerTransport = goodpackQtyPerTransport ?? result?.goodpack_qty_per_transport ?? null
@@ -127,7 +132,10 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
 
     // --- Lado Concorrente: mesmo padrão do Goodpack — campo direto de
     // peso envasado, sem derivar de volume/peso nominal (removidos do painel).
-    const origCompQtyKg = result?.competitor_qty_per_unit_kg ?? null
+    const origCompQtyKg = result?.competitor_qty_per_unit_kg
+      ?? (originalCompetitorPackagingPerUnit && originalCompetitorPackagingPerMt
+          ? (originalCompetitorPackagingPerUnit * 1000) / originalCompetitorPackagingPerMt
+          : null)
     const effectiveCompQty = hasEditableCompetitorQty ? competitorQtyPerUnit : origCompQtyKg
     const compQtyChanged = hasEditableCompetitorQty && effectiveCompQty !== origCompQtyKg
     const compQtyPerTransport = competitorQtyPerTransport ?? result?.competitor_qty_per_transport ?? null
