@@ -60,7 +60,9 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
   useEffect(() => {
     const ov = (key, fallback) => getOverrideValue(overrides, key, fallback)
 
-    setBreakdown((result?.packaging_breakdown ?? []).map(item => ({
+    const rawBreakdown = (result?.packaging_breakdown ?? [])
+    console.log('[TCODashboard] packaging_breakdown do result:', JSON.stringify(rawBreakdown))
+    setBreakdown(rawBreakdown.map(item => ({
       ...item, value: ov(`breakdown:${item.label}`, item.value),
     })))
     setCompetitorBreakdown((result?.competitor_packaging_breakdown ?? []).map(item => ({
