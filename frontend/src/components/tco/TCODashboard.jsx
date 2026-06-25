@@ -60,9 +60,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
   useEffect(() => {
     const ov = (key, fallback) => getOverrideValue(overrides, key, fallback)
 
-    const rawBreakdown = (result?.packaging_breakdown ?? [])
-    console.log('[TCODashboard] packaging_breakdown do result:', JSON.stringify(rawBreakdown))
-    setBreakdown(rawBreakdown.map(item => ({
+    setBreakdown((result?.packaging_breakdown ?? []).map(item => ({
       ...item, value: ov(`breakdown:${item.label}`, item.value),
     })))
     setCompetitorBreakdown((result?.competitor_packaging_breakdown ?? []).map(item => ({
@@ -384,7 +382,7 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
       type: 'bar',
       data: {
         labels: [goodpackSku, competitorName],
-        datasets: categories.map((c, i) => ({
+        datasets: categoriesForChart.map((c, i) => ({
           label: c.label,
           data: [goodpackData[i], competitorData[i]],
           backgroundColor: STACK_COLORS[i % STACK_COLORS.length],
