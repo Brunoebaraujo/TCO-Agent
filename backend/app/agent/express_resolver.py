@@ -81,18 +81,26 @@ async def _get_accessories(
     #         acessórios específicos para este produto/tipo (se existirem)
     relevant = [i for i in items if i.product_type_id is None or i.product_type_id == target_pt_id]
 
-    # Regional fallback por (accessory_type_id, product_type_id)
+    # Agrupa apenas por accessory_type_id.
+    # product_type_id e regiao sao criterios de PREFERENCIA (especifico > generico,
+    # regiao exata > GLOBAL), nao de agrupamento separado — dois registros com
+    # mesmo acc_type_id mas product_type_id diferente representam o mesmo acessorio
+    # e devem resultar em UMA entrada no breakdown (a mais especifica vence).
     region_upper = (region or "GLOBAL").upper()
-    grouped: dict[tuple, list] = defaultdict(list)
+    grouped: dict[int, list] = defaultdict(list)
     for item in relevant:
-        grouped[(item.accessory_type_id, item.product_type_id)].append(item)
+        grouped[item.accessory_type_id].append(item)
 
     result = []
-    for (acc_type_id, pt_id), candidates in grouped.items():
+    for acc_type_id, candidates in grouped.items():
+        specific  = [c for c in candidates if c.product_type_id == target_pt_id and target_pt_id is not None]
+        generic   = [c for c in candidates if c.product_type_id is None]
+        preferred = specific if specific else generic if generic else candidates
+
         chosen = (
-            next((c for c in candidates if (c.region or "GLOBAL").upper() == region_upper), None)
-            or next((c for c in candidates if (c.region or "GLOBAL").upper() == "GLOBAL"), None)
-            or candidates[0]
+            next((c for c in preferred if (c.region or "GLOBAL").upper() == region_upper), None)
+            or next((c for c in preferred if (c.region or "GLOBAL").upper() == "GLOBAL"), None)
+            or preferred[0]
         )
         result.append({
             "label": acc_names.get(acc_type_id, "?"),
