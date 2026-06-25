@@ -212,26 +212,30 @@ Gere a resposta agora."""
 
         # Injeta campos que o engine calculou mas o LLM pode ter omitido
         if tco_result:
+            # Campos narrativos: setdefault — o LLM gera esses, o engine não tem.
             tco_result.setdefault("goodpack_sku", request.goodpack_sku)
             tco_result.setdefault("competitor_name", request.competitor_name)
             tco_result.setdefault("product_name", request.product_name)
             tco_result.setdefault("simulated_metric_tonnes", request.volume_mt)
-            tco_result.setdefault("goodpack_total_per_mt", engine.get("goodpack_total_per_mt"))
-            tco_result.setdefault("competitor_total_per_mt", engine.get("competitor_total_per_mt"))
-            tco_result.setdefault("total_saving", engine.get("total_saving"))
-            tco_result.setdefault("saving_percentage", engine.get("saving_percentage"))
-            tco_result.setdefault("subtotals", engine.get("subtotals"))
-            tco_result.setdefault("categories", engine.get("categories"))
             tco_result.setdefault("logistics", engine.get("logistics"))
-            # Pesos tara — já vêm do engine com os nomes corretos; a injeção
-            # via setdefault garante que estejam presentes mesmo se o LLM omitir.
-            tco_result.setdefault("goodpack_tare_weight_kg", r.get("gp_tare_weight_kg"))
-            tco_result.setdefault("competitor_tare_weight_kg", r.get("comp_tare_weight_kg"))
-            # Qty por unidade — necessário para o frontend calcular $/MT via
-            # fórmula direta (sum_breakdown × 1000 / qty_kg). Sem estes campos,
-            # o dashboard cai no ratio scaling e amplifica erros do LLM.
-            tco_result.setdefault("goodpack_qty_per_unit_kg", r.get("goodpack_qty_per_unit_kg"))
-            tco_result.setdefault("competitor_qty_per_unit_kg", r.get("competitor_qty_per_unit_kg"))
+
+            # Campos numéricos críticos: SEMPRE do engine (update sobrescreve o LLM).
+            # O LLM pode gerar valores ligeiramente diferentes por arredondamento ou
+            # alucinação — o engine é a fonte da verdade para todos estes campos.
+            tco_result.update({
+                "goodpack_total_per_mt":        engine.get("goodpack_total_per_mt"),
+                "competitor_total_per_mt":       engine.get("competitor_total_per_mt"),
+                "total_saving":                  engine.get("total_saving"),
+                "saving_percentage":             engine.get("saving_percentage"),
+                "subtotals":                     engine.get("subtotals"),
+                "categories":                    engine.get("categories"),
+                "packaging_breakdown":           engine.get("packaging_breakdown"),
+                "competitor_packaging_breakdown": engine.get("competitor_packaging_breakdown"),
+                "goodpack_qty_per_unit_kg":      engine.get("goodpack_qty_per_unit_kg"),
+                "competitor_qty_per_unit_kg":    engine.get("competitor_qty_per_unit_kg"),
+                "goodpack_tare_weight_kg":       r.get("gp_tare_weight_kg"),
+                "competitor_tare_weight_kg":     r.get("comp_tare_weight_kg"),
+            })
 
         return {
             "role": "assistant",
