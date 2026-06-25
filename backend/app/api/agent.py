@@ -227,6 +227,11 @@ Gere a resposta agora."""
             # via setdefault garante que estejam presentes mesmo se o LLM omitir.
             tco_result.setdefault("goodpack_tare_weight_kg", r.get("gp_tare_weight_kg"))
             tco_result.setdefault("competitor_tare_weight_kg", r.get("comp_tare_weight_kg"))
+            # Qty por unidade — necessário para o frontend calcular $/MT via
+            # fórmula direta (sum_breakdown × 1000 / qty_kg). Sem estes campos,
+            # o dashboard cai no ratio scaling e amplifica erros do LLM.
+            tco_result.setdefault("goodpack_qty_per_unit_kg", r.get("goodpack_qty_per_unit_kg"))
+            tco_result.setdefault("competitor_qty_per_unit_kg", r.get("competitor_qty_per_unit_kg"))
 
         return {
             "role": "assistant",
