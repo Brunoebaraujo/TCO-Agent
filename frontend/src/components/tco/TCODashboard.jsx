@@ -110,97 +110,70 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
   const handlingPackerCategory = categories.find(c => c.label === 'Handling packer')
   const handlingEnduserCategory = categories.find(c => c.label === 'Handling enduser')
 
+  // ---------------------------------------------------------------------------
+  // Somatórios do breakdown — calculados diretamente dos arrays de estado.
+  // Estes são os valores visíveis na tela; o $/MT de Packaging é derivado
+  // exclusivamente daqui, sem passar por nenhum valor gerado pelo LLM.
+  // ---------------------------------------------------------------------------
+  const gpBreakdownSum = breakdown.reduce((s, i) => s + (Number(i.value) || 0), 0)
+  const compBreakdownSum = competitorBreakdown.reduce((s, i) => s + (Number(i.value) || 0), 0)
+
+  // Peso envasado efetivo: valor editado pelo vendedor, ou fallback do result.
+  const effectiveGpQtyDirect   = qtyPerUnit        ?? result?.goodpack_qty_per_unit_kg   ?? null
+  const effectiveCompQtyDirect = competitorQtyPerUnit ?? result?.competitor_qty_per_unit_kg ?? null
+
+  // $/MT de Packaging: somatório / (peso_envasado / 1000). Simples e direto.
+  const gpPackagingPerMt   = (gpBreakdownSum   > 0 && effectiveGpQtyDirect   > 0)
+    ? (gpBreakdownSum   * 1000) / effectiveGpQtyDirect
+    : (packagingCategory?.goodpack    ?? 0)
+  const compPackagingPerMt = (compBreakdownSum > 0 && effectiveCompQtyDirect > 0)
+    ? (compBreakdownSum * 1000) / effectiveCompQtyDirect
+    : (packagingCategory?.competitor  ?? 0)
+
   const recalculated = useMemo(() => {
-    // --- Lado Goodpack ---
-    // goodpack_qty_per_unit_kg pode nao vir no result (fluxo chat normal).
-    // Fallback: deriva de per_unit / (perMt/1000) — inverso da formula do engine.
-    const origGpQtyKg = result?.goodpack_qty_per_unit_kg
-      ?? (originalPackagingPerUnit && originalPackagingPerMt
-          ? (originalPackagingPerUnit * 1000) / originalPackagingPerMt
-          : null)
-    const effectiveGpQty = hasEditableQty ? qtyPerUnit : origGpQtyKg
-    const gpQtyChanged = hasEditableQty && effectiveGpQty !== origGpQtyKg
-    const gpQtyPerTransport = goodpackQtyPerTransport ?? result?.goodpack_qty_per_transport ?? null
+    const effectiveGpQty   = effectiveGpQtyDirect
+    const effectiveCompQty = effectiveCompQtyDirect
+    const gpQtyPerTransport  = goodpackQtyPerTransport  ?? result?.goodpack_qty_per_transport  ?? null
     const gpStackFullWarehouse = result?.goodpack_stack_full_warehouse ?? null
-    const effectiveTransportCost = transportCostPerContainer ?? result?.goodpack_transport_cost_per_container ?? null
-    const gpQtyRatio = gpQtyChanged && origGpQtyKg ? origGpQtyKg / effectiveGpQty : 1
-
-    const recalcedByQtyGoodpack = gpQtyChanged && effectiveGpQty
-      ? recalcCategoriesByQty(categories, 'goodpack', effectiveGpQty, origGpQtyKg, gpQtyPerTransport, effectiveTransportCost,
-          breakdown.reduce((s, i) => s + (Number(i.value) || 0), 0) || null)
-      : null
-
-    // --- Lado Concorrente: mesmo padrão do Goodpack — campo direto de
-    // peso envasado, sem derivar de volume/peso nominal (removidos do painel).
-    const origCompQtyKg = result?.competitor_qty_per_unit_kg
-      ?? (originalCompetitorPackagingPerUnit && originalCompetitorPackagingPerMt
-          ? (originalCompetitorPackagingPerUnit * 1000) / originalCompetitorPackagingPerMt
-          : null)
-    const effectiveCompQty = hasEditableCompetitorQty ? competitorQtyPerUnit : origCompQtyKg
-    const compQtyChanged = hasEditableCompetitorQty && effectiveCompQty !== origCompQtyKg
     const compQtyPerTransport = competitorQtyPerTransport ?? result?.competitor_qty_per_transport ?? null
     const compStackFullWarehouse = result?.competitor_stack_full_warehouse ?? null
+    const effectiveTransportCost = transportCostPerContainer ?? result?.goodpack_transport_cost_per_container ?? null
 
-    const recalcedByQtyCompetitor = compQtyChanged && effectiveCompQty
-      ? recalcCategoriesByQty(categories, 'competitor', effectiveCompQty, origCompQtyKg, compQtyPerTransport, effectiveTransportCost,
-          competitorBreakdown.reduce((s, i) => s + (Number(i.value) || 0), 0) || null)
-      : null
-
-    // Cada categoria com preço editável é recalculada pelo preço e depois
-    // ajustada pela mesma proporção de qty (se a qty também mudou).
-    const categoryOverrides = {}
-
-    if (hasEditableBreakdown || hasEditableCompetitorBreakdown) {
-      categoryOverrides.Packaging = categoryOverrides.Packaging || {}
-      if (hasEditableBreakdown) {
-        const newPerUnit = breakdown.reduce((s, i) => s + (Number(i.value) || 0), 0)
-        // Fórmula direta: evita ampliar erros do perMt original gerado pelo LLM
-        categoryOverrides.Packaging.perMt = effectiveGpQty > 0
-          ? (newPerUnit * 1000) / effectiveGpQty
-          : recalcPackagingByPrice(breakdown, originalPackagingPerUnit, originalPackagingPerMt).perMt
-      }
-      if (hasEditableCompetitorBreakdown) {
-        const newCompPerUnit = competitorBreakdown.reduce((s, i) => s + (Number(i.value) || 0), 0)
-        categoryOverrides.Packaging.competitorPerMt = effectiveCompQty > 0
-          ? (newCompPerUnit * 1000) / effectiveCompQty
-          : recalcPackagingByPrice(competitorBreakdown, originalCompetitorPackagingPerUnit, originalCompetitorPackagingPerMt).perMt
+    // categoryOverrides: força Packaging a usar o $/MT calculado acima.
+    // Demais categorias só são sobrescritas se o vendedor editou parâmetros
+    // de handling ou frete.
+    const categoryOverrides = {
+      Packaging: {
+        perMt:         gpPackagingPerMt,
+        competitorPerMt: compPackagingPerMt,
       }
     }
 
-    // Transport: se o frete por container foi editado, recalcula igual o
-    // backend faz (custo por container ÷ qty real que cabe em MT).
-    if (transportCostPerContainer != null && effectiveGpQty) {
-      const liquidMtPerContainerGp = (effectiveGpQty / 1000) * gpQtyPerTransport
-      if (liquidMtPerContainerGp) {
-        categoryOverrides.Transport = categoryOverrides.Transport || {}
-        categoryOverrides.Transport.perMt = transportCostPerContainer / liquidMtPerContainerGp
-      }
+    // Transport
+    if (effectiveTransportCost != null && effectiveGpQty && gpQtyPerTransport) {
+      const liqGp = (effectiveGpQty / 1000) * gpQtyPerTransport
+      if (liqGp) { categoryOverrides.Transport = categoryOverrides.Transport || {}; categoryOverrides.Transport.perMt = effectiveTransportCost / liqGp }
     }
-    if (transportCostPerContainer != null && effectiveCompQty && compQtyPerTransport) {
-      const liquidMtPerContainerComp = (effectiveCompQty / 1000) * compQtyPerTransport
-      if (liquidMtPerContainerComp) {
-        categoryOverrides.Transport = categoryOverrides.Transport || {}
-        categoryOverrides.Transport.competitorPerMt = transportCostPerContainer / liquidMtPerContainerComp
-      }
+    if (effectiveTransportCost != null && effectiveCompQty && compQtyPerTransport) {
+      const liqComp = (effectiveCompQty / 1000) * compQtyPerTransport
+      if (liqComp) { categoryOverrides.Transport = categoryOverrides.Transport || {}; categoryOverrides.Transport.competitorPerMt = effectiveTransportCost / liqComp }
     }
 
-    // Handling: sempre computado ao vivo a partir do dict de parâmetros —
-    // sem isso ser "editado" tecnicamente, o resultado bate com o que o
-    // agente já tinha calculado (mesma fórmula, portada fielmente pro JS).
+    // Handling
     if (Object.keys(handlingBenchmarks).length > 0 && handlingPackerCategory) {
       const hpPerUnit = computeHandlingPacker(handlingBenchmarks, gpStackFullWarehouse)
       const hp = recalcCategoryByUnitPrice(hpPerUnit, handlingPackerCategory.goodpack_per_unit ?? 0, handlingPackerCategory.goodpack ?? 0)
-      categoryOverrides['Handling packer'] = { perMt: hp.perMt * gpQtyRatio }
+      categoryOverrides['Handling packer'] = { perMt: hp.perMt }
     }
     if (Object.keys(handlingBenchmarks).length > 0 && handlingEnduserCategory) {
       const hePerUnit = computeHandlingEnduser(handlingBenchmarks, gpStackFullWarehouse)
       const he = recalcCategoryByUnitPrice(hePerUnit, handlingEnduserCategory.goodpack_per_unit ?? 0, handlingEnduserCategory.goodpack ?? 0)
-      categoryOverrides['Handling enduser'] = { perMt: he.perMt * gpQtyRatio }
+      categoryOverrides['Handling enduser'] = { perMt: he.perMt }
     }
 
-    const totals = recalcTotals(result ?? {}, categoryOverrides, recalcedByQtyGoodpack, recalcedByQtyCompetitor)
+    const totals = recalcTotals(result ?? {}, categoryOverrides, null, null)
 
-    // Logística — recalcula os dois lados quando capacidade/qty mudou
+    // Logística
     let logistics = result?.logistics
     const newGpLogistics = (effectiveGpQty && gpQtyPerTransport && gpStackFullWarehouse)
       ? recalcLogistics(result.simulated_metric_tonnes, effectiveGpQty, gpQtyPerTransport, gpStackFullWarehouse)
@@ -227,11 +200,11 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
 
     return { totals, logistics }
   }, [
-    breakdown, competitorBreakdown, qtyPerUnit, result, hasEditableBreakdown, hasEditableQty,
-    hasEditableCompetitorBreakdown, originalPackagingPerUnit, originalPackagingPerMt,
-    originalCompetitorPackagingPerUnit, originalCompetitorPackagingPerMt, categories,
-    handlingBenchmarks, handlingPackerCategory, handlingEnduserCategory, transportCostPerContainer,
-    goodpackQtyPerTransport, competitorQtyPerUnit, hasEditableCompetitorQty, competitorQtyPerTransport,
+    gpPackagingPerMt, compPackagingPerMt,
+    effectiveGpQtyDirect, effectiveCompQtyDirect,
+    result, categories, handlingBenchmarks,
+    handlingPackerCategory, handlingEnduserCategory,
+    transportCostPerContainer, goodpackQtyPerTransport, competitorQtyPerTransport,
   ])
 
   async function handleExport(includeAssumptions) {
@@ -562,6 +535,18 @@ export default function TCODashboard({ result, sessionId, overrides = {}, onOver
                     Confirmar todos os valores acima
                   </button>
                 )}
+              </div>
+
+              {/* Somatório e $/MT calculados diretamente dos campos acima */}
+              <div className="mt-2 pt-2 border-t border-slate-200 grid grid-cols-[1fr_56px_56px] gap-x-1.5 items-center">
+                <span className="text-[11px] font-medium text-slate-600">Total emb. + acess.</span>
+                <span className="text-[11px] font-medium text-slate-800 text-right">{gpBreakdownSum > 0 ? gpBreakdownSum.toFixed(2) : '—'}</span>
+                <span className="text-[11px] font-medium text-slate-800 text-right">{compBreakdownSum > 0 ? compBreakdownSum.toFixed(2) : '—'}</span>
+              </div>
+              <div className="mt-1 grid grid-cols-[1fr_56px_56px] gap-x-1.5 items-center">
+                <span className="text-[11px] text-slate-500">$/MT (÷ peso envasado)</span>
+                <span className="text-[11px] font-semibold text-blue-700 text-right">{gpPackagingPerMt > 0 ? gpPackagingPerMt.toFixed(2) : '—'}</span>
+                <span className="text-[11px] font-semibold text-blue-700 text-right">{compPackagingPerMt > 0 ? compPackagingPerMt.toFixed(2) : '—'}</span>
               </div>
             )
           })()}
