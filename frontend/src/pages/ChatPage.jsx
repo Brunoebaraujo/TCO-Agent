@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Send, Loader2 } from 'lucide-react'
 import TCODashboard from '../components/tco/TCODashboard'
 import PendingPanel from '../components/tco/PendingPanel'
+import KBOfferPanel from '../components/tco/KBOfferPanel'
 import ExpressForm from '../components/tco/ExpressForm'
 import { formatOverridesBlock, formatPreviousAccessoriesBlock } from '../components/tco/dashboardCalc'
 
@@ -86,6 +87,7 @@ export default function ChatPage() {
             content: m.content,
             tco_result: m.tco_result ?? null,
             pending_text: m.pending_text ?? null,
+            kb_offer: m.kb_offer ?? null,
           })),
         }),
       })
@@ -126,6 +128,7 @@ export default function ChatPage() {
         content: data.content,
         tco_result: data.tco_result ?? null,
         pending_text: data.pending_text ?? null,
+        kb_offer: data.kb_offer ?? null,
       }
       const finalMessages = [...messagesWithUser, assistantMessage]
       setMessages(finalMessages)
@@ -195,6 +198,7 @@ export default function ChatPage() {
         content: data.content,
         tco_result: data.tco_result ?? null,
         pending_text: data.pending_text ?? null,
+        kb_offer: data.kb_offer ?? null,
       }
       const finalMessages = [...messagesWithUser, assistantMessage]
       setMessages(finalMessages)
@@ -258,6 +262,7 @@ export default function ChatPage() {
                 />
               )}
               {msg.pending_text && <PendingPanel text={msg.pending_text} />}
+              {msg.kb_offer && <KBOfferPanel offer={msg.kb_offer} />}
             </div>
           </div>
         ))}

@@ -449,3 +449,98 @@ async def delete_packaging_accessory(item_id: int, db: AsyncSession = Depends(ge
         raise HTTPException(status_code=404, detail="Vínculo não encontrado")
     item.is_current = False
     return {"deleted": True}
+
+# ---------------------------------------------------------------------------
+# KB Apply Offer — salva os itens confirmados pelo vendedor no painel KB_OFFER
+# ---------------------------------------------------------------------------
+from pydantic import BaseModel as _BaseModel
+from typing import List as _List, Optional as _Optional
+
+class KBOfferItem(_BaseModel):
+    type: str                          # "accessory_price" | "qty" | "remove_accessory"
+    label: str                         # nome exibido ao vendedor
+    packaging_type: str                # "goodpack" | "competitor"
+    goodpack_sku_id: _Optional[int] = None
+    competitor_unit_id: _Optional[int] = None
+    accessory_type_id: _Optional[int] = None
+    value: _Optional[float] = None     # novo preço (None para remove_accessory)
+    qty_field: _Optional[str] = None   # "qty_40ft_dry" etc (para type=qty)
+    currency: str = "USD"
+    region: str = "GLOBAL"
+
+class KBApplyOfferPayload(_BaseModel):
+    items: _List[KBOfferItem]
+
+
+@router.post("/apply-offer")
+async def apply_kb_offer(payload: KBApplyOfferPayload, db: AsyncSession = Depends(get_db)):
+    """
+    Recebe os itens que o vendedor confirmou no painel KB_OFFER e persiste
+    cada um na base de conhecimento, seguindo o mesmo padrão de update
+    dos endpoints de KB existentes.
+    """
+    from app.db.models import GoodpackSku, CompetitorUnit
+    saved = []
+    skipped = []
+
+    for item in payload.items:
+
+        # --- Atualiza qty de container (GoodpackSku ou CompetitorUnit) ---
+        if item.type == "qty" and item.qty_field and item.value is not None:
+            if item.packaging_type == "goodpack" and item.goodpack_sku_id:
+                sku = await db.get(GoodpackSku, item.goodpack_sku_id)
+                if sku and hasattr(sku, item.qty_field):
+                    setattr(sku, item.qty_field, int(item.value))
+                    saved.append(item.label)
+                else:
+                    skipped.append(item.label)
+            elif item.packaging_type == "competitor" and item.competitor_unit_id:
+                unit = await db.get(CompetitorUnit, item.competitor_unit_id)
+                if unit and hasattr(unit, item.qty_field):
+                    setattr(unit, item.qty_field, int(item.value))
+                    saved.append(item.label)
+                else:
+                    skipped.append(item.label)
+            continue
+
+        # --- Remove acessório da estrutura padrão ---
+        if item.type == "remove_accessory" and item.accessory_type_id:
+            q = select(PackagingAccessory).where(
+                PackagingAccessory.is_current == True,
+                PackagingAccessory.accessory_type_id == item.accessory_type_id,
+            )
+            if item.goodpack_sku_id:
+                q = q.where(PackagingAccessory.goodpack_sku_id == item.goodpack_sku_id)
+            if item.competitor_unit_id:
+                q = q.where(PackagingAccessory.competitor_unit_id == item.competitor_unit_id)
+            rows = (await db.execute(q)).scalars().all()
+            for row in rows:
+                row.is_current = False
+            saved.append(f"Removido: {item.label}")
+            continue
+
+        # --- Atualiza preço de acessório ---
+        if item.type == "accessory_price" and item.accessory_type_id and item.value is not None:
+            q = select(PackagingAccessory).where(
+                PackagingAccessory.is_current == True,
+                PackagingAccessory.accessory_type_id == item.accessory_type_id,
+            )
+            if item.goodpack_sku_id:
+                q = q.where(PackagingAccessory.goodpack_sku_id == item.goodpack_sku_id)
+            if item.competitor_unit_id:
+                q = q.where(PackagingAccessory.competitor_unit_id == item.competitor_unit_id)
+            rows = (await db.execute(q)).scalars().all()
+            if rows:
+                for row in rows:
+                    row.default_unit_price = item.value
+                    row.confidence_level = "high"
+                    row.collected_at = date.today()
+                saved.append(item.label)
+            else:
+                skipped.append(item.label)
+            continue
+
+        skipped.append(item.label)
+
+    await db.commit()
+    return {"saved": saved, "skipped": skipped}

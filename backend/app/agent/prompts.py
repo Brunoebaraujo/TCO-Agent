@@ -263,36 +263,69 @@ Seja conciso. Vendedores estão ocupados — não generalize, não enrole, vá d
 
 KB_UPDATE_OFFER = """## Oferecer atualização permanente da base de conhecimento
 
-Quando você gerar um TCO_RESULT usando valores do bloco `[VALORES CONFIRMADOS NESTA SESSÃO: ...]` \
-(ver seção Valores já confirmados), verifique se algum desses valores é "elegível" pra virar \
-default permanente da base — ou seja, mapeia pra UM campo único e claro:
+### Quando emitir o bloco KB_OFFER
 
-- **Preço de acessório** (ex: "Poly Liner (Goodpack)", "Poly Liner (Concorrente)") — elegível.
-- **Quantidade por container** — elegível (mapeia direto pra qty_20ft_dry/qty_40ft_dry/etc da embalagem).
-- **NÃO elegível**: Unit cost (preço comercial, nunca vira benchmark — é sempre específico do \
-negócio), Peso envasado/qty_per_unit_kg (é o fato prático daquele negócio, não uma spec de \
-catálogo — varia por cliente, não deve virar default geral), Handling packer/enduser totais (são \
-soma de ~10 parâmetros — não dá pra escrever de volta um total agregado num campo só).
+Se a mensagem do vendedor começar com "Finalizar análise. Revise todos os valores..." \
+(vem do botão "Finalizar TCO"), você deve:
+1. Escrever UMA frase curta de encerramento no texto (ex: "TCO finalizado. Aqui estão os itens \
+   que você confirmou nesta sessão e que podem ser salvos na base de conhecimento:").
+2. Emitir APENAS o bloco <<<KB_OFFER>>> abaixo — sem mais texto, sem listas, sem tabelas.
+   O frontend renderiza o painel interativo; você não precisa exibir nada mais.
 
-Se houver pelo menos um item elegível, pergunte ao final da sua resposta (depois do bloco \
-TCO_RESULT, no texto), algo como: "Notei que você ajustou o preço do Poly Liner pra $2,50 — quer \
-que eu atualize isso na base de conhecimento pra próximas análises já usarem esse valor? \
-(Pallet também mudou, se quiser atualizar os dois)". Pergunte de forma natural, agrupando todos os \
-itens elegíveis numa pergunta só — não uma pergunta por item.
+NÃO emita KB_OFFER em outros turnos — só no botão Finalizar TCO.
 
-SÓ chame `update_knowledge_base` depois que o vendedor confirmar explicitamente quais itens \
-quer atualizar (pode ser "sim, todos", "só o Poly Liner", "não" — respeite a resposta). NUNCA \
-chame essa tool de forma proativa ou no mesmo turno em que ofereceu — sempre espere a resposta. \
-Depois de atualizar, confirme em uma frase curta o que foi salvo.
+### Elegibilidade
 
-Não ofereça isso toda resposta — só quando o TCO_RESULT daquele turno especificamente usou um \
-valor do bloco de overrides confirmados (ou seja, algo realmente mudou desde o último cálculo).
+- ✅ **Preço de acessório** (Poly Liner, Aseptic Bag, Pallet, etc.) — elegível.
+- ✅ **Quantidade por container** (qty_40ft_dry, qty_20ft_dry, etc.) — elegível.
+- ⚠️ **Acessório confirmado com valor $0** — NÃO atualiza para zero; pergunta se deve \
+  REMOVER o acessório da estrutura padrão (type="remove_accessory").
+- ❌ **Unit cost** — nunca elegível (preço comercial, específico do negócio).
+- ❌ **Peso envasado / qty_per_unit_kg** — nunca elegível (varia por cliente).
+- ❌ **Handling packer/enduser totais** — nunca elegível (é soma de ~10 parâmetros).
 
-**Exceção:** se a mensagem do vendedor for literalmente "Finalizar análise. Revise todos os \
-valores que confirmei nesta sessão..." (vem do botão "Finalizar TCO" do dashboard), revise TODO \
-o bloco `[VALORES CONFIRMADOS NESTA SESSÃO: ...]` da mensagem (não só o que mudou neste turno) e \
-liste de uma vez todos os itens elegíveis pra atualizar, mesmo os que você já tinha oferecido — o \
-vendedor pode ter ignorado uma oferta anterior e quer decidir tudo de uma vez no fechamento.
+### Schema do bloco KB_OFFER
+
+<<<KB_OFFER>>>
+{
+  "intro": "Texto curto opcional que aparece acima dos checkboxes (máx 1 frase)",
+  "items": [
+    {
+      "type": "accessory_price",
+      "label": "Poly Liner — Goodpack",
+      "packaging_type": "goodpack",
+      "goodpack_sku_id": <id ou null>,
+      "accessory_type_id": <id>,
+      "value": 4.00,
+      "currency": "USD",
+      "region": "BRAZIL",
+      "checked": true
+    },
+    {
+      "type": "qty",
+      "label": "Qty Goodpack por container (40ft dry)",
+      "packaging_type": "goodpack",
+      "goodpack_sku_id": <id ou null>,
+      "qty_field": "qty_40ft_dry",
+      "value": 15,
+      "checked": true
+    },
+    {
+      "type": "remove_accessory",
+      "label": "Top Sheet — Goodpack (remover da estrutura padrão?)",
+      "packaging_type": "goodpack",
+      "goodpack_sku_id": <id ou null>,
+      "accessory_type_id": <id>,
+      "value": null,
+      "checked": false
+    }
+  ]
+}
+<<<END_KB_OFFER>>>
+
+Use os IDs reais dos registros quando disponíveis no contexto. \
+Se não souber o ID, use null — o backend tentará resolver por nome. \
+"checked": true = selecionado por padrão; false = desmarcado (ex: zeros, incertos).
 """
 
 PENDING_BLOCK = """## Quando gerar o bloco de pendências (<<<PENDING>>>)

@@ -101,13 +101,14 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         history = _truncate_history(history)
 
         raw_reply = await ask_agent(history, db)
-        clean_text, tco_result, pending_text = extract_tco_result(raw_reply)
+        clean_text, tco_result, pending_text, kb_offer = extract_tco_result(raw_reply)
 
         return {
             "role": "assistant",
             "content": clean_text,
             "tco_result": tco_result,
             "pending_text": pending_text,
+            "kb_offer": kb_offer,
         }
 
     except Exception as e:
@@ -208,7 +209,7 @@ Gere a resposta agora."""
             block.text for block in response.content if block.type == "text"
         )
 
-        clean_text, tco_result, pending_text = extract_tco_result(raw_reply)
+        clean_text, tco_result, pending_text, kb_offer = extract_tco_result(raw_reply)
 
         # Injeta campos que o engine calculou mas o LLM pode ter omitido
         if tco_result:

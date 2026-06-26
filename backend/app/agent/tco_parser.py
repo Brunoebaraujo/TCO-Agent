@@ -29,6 +29,11 @@ _PENDING_PATTERN = re.compile(
     re.DOTALL,
 )
 
+_KB_OFFER_PATTERN = re.compile(
+    r"<<<KB_OFFER>>>\s*(.*?)\s*<<<END_KB_OFFER>>>",
+    re.DOTALL,
+)
+
 
 def _try_repair_truncated_json(raw: str) -> Optional[dict]:
     """
@@ -55,24 +60,35 @@ def _try_repair_truncated_json(raw: str) -> Optional[dict]:
         return None
 
 
-def extract_tco_result(text: str) -> Tuple[str, Optional[dict], Optional[str]]:
+def extract_tco_result(text: str) -> Tuple[str, Optional[dict], Optional[str], Optional[dict]]:
     """
-    Retorna (texto_limpo, tco_result_ou_None, pending_text_ou_None).
+    Retorna (texto_limpo, tco_result_ou_None, pending_text_ou_None, kb_offer_ou_None).
 
     Extrai e remove da resposta:
     - O bloco <<<TCO_RESULT>>> (se presente) → retorna como dict
     - O bloco <<<PENDING>>> (se presente) → retorna como string de texto
+    - O bloco <<<KB_OFFER>>> (se presente) → retorna como dict com itens elegíveis
 
     O texto restante (conversacional) é retornado limpo, sem os blocos.
     """
     pending_text: Optional[str] = None
     tco_result: Optional[dict] = None
+    kb_offer: Optional[dict] = None
 
-    # Extrai PENDING primeiro (não tem lógica de repair — é só texto)
+    # Extrai PENDING
     pending_match = _PENDING_PATTERN.search(text)
     if pending_match:
         pending_text = pending_match.group(1).strip()
         text = _PENDING_PATTERN.sub("", text)
+
+    # Extrai KB_OFFER
+    kb_match = _KB_OFFER_PATTERN.search(text)
+    if kb_match:
+        try:
+            kb_offer = json.loads(kb_match.group(1))
+            text = _KB_OFFER_PATTERN.sub("", text)
+        except json.JSONDecodeError:
+            pass
 
     # Extrai TCO_RESULT
     match = _COMPLETE_PATTERN.search(text)
@@ -92,4 +108,4 @@ def extract_tco_result(text: str) -> Tuple[str, Optional[dict], Optional[str]]:
                 text = _TRUNCATED_PATTERN.sub("", text)
 
     clean_text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return clean_text, tco_result, pending_text
+    return clean_text, tco_result, pending_text, kb_offer
