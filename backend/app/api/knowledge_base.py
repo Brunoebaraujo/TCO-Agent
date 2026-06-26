@@ -453,10 +453,9 @@ async def delete_packaging_accessory(item_id: int, db: AsyncSession = Depends(ge
 # ---------------------------------------------------------------------------
 # KB Apply Offer — salva os itens confirmados pelo vendedor no painel KB_OFFER
 # ---------------------------------------------------------------------------
-from pydantic import BaseModel as _BaseModel
 from typing import List as _List, Optional as _Optional
 
-class KBOfferItem(_BaseModel):
+class KBOfferItem(BaseModel):
     model_config = {"extra": "ignore"}   # ignora campos extras como "checked"
     type: str
     label: str
@@ -469,7 +468,7 @@ class KBOfferItem(_BaseModel):
     currency: str = "USD"
     region: str = "GLOBAL"
 
-class KBApplyOfferPayload(_BaseModel):
+class KBApplyOfferPayload(BaseModel):
     model_config = {"extra": "ignore"}
     items: _List[KBOfferItem]
 
@@ -481,7 +480,8 @@ async def apply_kb_offer(payload: KBApplyOfferPayload, db: AsyncSession = Depend
     cada um na base de conhecimento, seguindo o mesmo padrão de update
     dos endpoints de KB existentes.
     """
-    from app.db.models import GoodpackSku, CompetitorUnit
+    # GoodpackSKU = nome real no models.py (K maiúsculo)
+    from app.db.models import GoodpackSKU, CompetitorUnit
     saved = []
     skipped = []
 
@@ -490,7 +490,7 @@ async def apply_kb_offer(payload: KBApplyOfferPayload, db: AsyncSession = Depend
         # --- Atualiza qty de container (GoodpackSku ou CompetitorUnit) ---
         if item.type == "qty" and item.qty_field and item.value is not None:
             if item.packaging_type == "goodpack" and item.goodpack_sku_id:
-                sku = await db.get(GoodpackSku, item.goodpack_sku_id)
+                sku = await db.get(GoodpackSKU, item.goodpack_sku_id)
                 if sku and hasattr(sku, item.qty_field):
                     setattr(sku, item.qty_field, int(item.value))
                     saved.append(item.label)
