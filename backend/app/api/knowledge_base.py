@@ -476,61 +476,124 @@ class KBApplyOfferPayload(BaseModel):
 @router.post("/apply-offer")
 async def apply_kb_offer(payload: KBApplyOfferPayload, db: AsyncSession = Depends(get_db)):
     """
-    Recebe os itens que o vendedor confirmou no painel KB_OFFER e persiste
-    cada um na base de conhecimento, seguindo o mesmo padrão de update
-    dos endpoints de KB existentes.
+    Recebe os itens confirmados no painel KB_OFFER e persiste na KB.
+    Resolve IDs por nome quando o LLM não os inclui (caso típico).
+    O label segue o padrão: "Nome Acessório — Goodpack (SKU / Produto)"
+    ou "Nome Acessório — Concorrente (Unit / Produto)".
     """
-    # GoodpackSKU = nome real no models.py (K maiúsculo)
-    from app.db.models import GoodpackSKU, CompetitorUnit
+    from app.db.models import GoodpackSKU, CompetitorUnit as CompUnit
+
+    # Carrega dicionários de resolução por nome
+    all_acc_types  = (await db.execute(select(AccessoryType))).scalars().all()
+    all_skus       = (await db.execute(select(GoodpackSKU))).scalars().all()
+    all_comp_units = (await db.execute(select(CompUnit))).scalars().all()
+    acc_by_name  = {a.accessory_name.lower(): a.id for a in all_acc_types}
+    sku_by_code  = {s.sku_code.lower(): s.id for s in all_skus}
+    comp_by_name = {u.unit_name.lower(): u.id for u in all_comp_units}
+
+    def resolve_acc_id(item) -> _Optional[int]:
+        if item.accessory_type_id:
+            return item.accessory_type_id
+        # Extrai nome do acessório do label: "Poly Liner — Goodpack (MB6 / ...)"
+        raw = item.label.split("—")[0].strip().lower()
+        return acc_by_name.get(raw)
+
+    def resolve_sku_id(item) -> _Optional[int]:
+        if item.goodpack_sku_id:
+            return item.goodpack_sku_id
+        # Tenta extrair SKU do label entre parênteses: "... (MB6 / Orange FCOJ)"
+        import re
+        m = re.search(r"\(([^/]+)", item.label)
+        if m:
+            sku_raw = m.group(1).strip().lower()
+            return sku_by_code.get(sku_raw)
+        return None
+
+    def resolve_comp_id(item) -> _Optional[int]:
+        if item.competitor_unit_id:
+            return item.competitor_unit_id
+        import re
+        m = re.search(r"\(([^/]+)", item.label)
+        if m:
+            comp_raw = m.group(1).strip().lower()
+            return comp_by_name.get(comp_raw)
+        return None
+
     saved = []
     skipped = []
 
     for item in payload.items:
 
-        # --- Atualiza qty de container (GoodpackSku ou CompetitorUnit) ---
+        # --- Qty de container ---
         if item.type == "qty" and item.qty_field and item.value is not None:
-            if item.packaging_type == "goodpack" and item.goodpack_sku_id:
-                sku = await db.get(GoodpackSKU, item.goodpack_sku_id)
-                if sku and hasattr(sku, item.qty_field):
-                    setattr(sku, item.qty_field, int(item.value))
-                    saved.append(item.label)
-                else:
-                    skipped.append(item.label)
-            elif item.packaging_type == "competitor" and item.competitor_unit_id:
-                unit = await db.get(CompetitorUnit, item.competitor_unit_id)
-                if unit and hasattr(unit, item.qty_field):
-                    setattr(unit, item.qty_field, int(item.value))
-                    saved.append(item.label)
-                else:
-                    skipped.append(item.label)
+            if item.packaging_type == "goodpack":
+                sku_id = resolve_sku_id(item)
+                if sku_id:
+                    sku = await db.get(GoodpackSKU, sku_id)
+                    if sku and hasattr(sku, item.qty_field):
+                        setattr(sku, item.qty_field, int(item.value))
+                        saved.append(item.label)
+                        continue
+            elif item.packaging_type == "competitor":
+                comp_id = resolve_comp_id(item)
+                if comp_id:
+                    unit = await db.get(CompUnit, comp_id)
+                    if unit and hasattr(unit, item.qty_field):
+                        setattr(unit, item.qty_field, int(item.value))
+                        saved.append(item.label)
+                        continue
+            skipped.append(item.label)
             continue
 
-        # --- Remove acessório da estrutura padrão ---
-        if item.type == "remove_accessory" and item.accessory_type_id:
+        # --- Remove acessório ---
+        if item.type == "remove_accessory":
+            acc_id = resolve_acc_id(item)
+            if not acc_id:
+                skipped.append(item.label)
+                continue
             q = select(PackagingAccessory).where(
                 PackagingAccessory.is_current == True,
-                PackagingAccessory.accessory_type_id == item.accessory_type_id,
+                PackagingAccessory.accessory_type_id == acc_id,
             )
-            if item.goodpack_sku_id:
-                q = q.where(PackagingAccessory.goodpack_sku_id == item.goodpack_sku_id)
-            if item.competitor_unit_id:
-                q = q.where(PackagingAccessory.competitor_unit_id == item.competitor_unit_id)
+            if item.packaging_type == "goodpack":
+                sku_id = resolve_sku_id(item)
+                if sku_id:
+                    q = q.where(PackagingAccessory.goodpack_sku_id == sku_id)
+                else:
+                    q = q.where(PackagingAccessory.goodpack_sku_id.isnot(None))
+            else:
+                comp_id = resolve_comp_id(item)
+                if comp_id:
+                    q = q.where(PackagingAccessory.competitor_unit_id == comp_id)
             rows = (await db.execute(q)).scalars().all()
-            for row in rows:
-                row.is_current = False
-            saved.append(f"Removido: {item.label}")
+            if rows:
+                for row in rows:
+                    row.is_current = False
+                saved.append(item.label)
+            else:
+                skipped.append(item.label)
             continue
 
-        # --- Atualiza preço de acessório ---
-        if item.type == "accessory_price" and item.accessory_type_id and item.value is not None:
+        # --- Preço de acessório ---
+        if item.type == "accessory_price" and item.value is not None:
+            acc_id = resolve_acc_id(item)
+            if not acc_id:
+                skipped.append(item.label)
+                continue
             q = select(PackagingAccessory).where(
                 PackagingAccessory.is_current == True,
-                PackagingAccessory.accessory_type_id == item.accessory_type_id,
+                PackagingAccessory.accessory_type_id == acc_id,
             )
-            if item.goodpack_sku_id:
-                q = q.where(PackagingAccessory.goodpack_sku_id == item.goodpack_sku_id)
-            if item.competitor_unit_id:
-                q = q.where(PackagingAccessory.competitor_unit_id == item.competitor_unit_id)
+            if item.packaging_type == "goodpack":
+                sku_id = resolve_sku_id(item)
+                if sku_id:
+                    q = q.where(PackagingAccessory.goodpack_sku_id == sku_id)
+                else:
+                    q = q.where(PackagingAccessory.goodpack_sku_id.isnot(None))
+            else:
+                comp_id = resolve_comp_id(item)
+                if comp_id:
+                    q = q.where(PackagingAccessory.competitor_unit_id == comp_id)
             rows = (await db.execute(q)).scalars().all()
             if rows:
                 for row in rows:
