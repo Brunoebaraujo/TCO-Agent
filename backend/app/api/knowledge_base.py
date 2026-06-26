@@ -457,18 +457,20 @@ from pydantic import BaseModel as _BaseModel
 from typing import List as _List, Optional as _Optional
 
 class KBOfferItem(_BaseModel):
-    type: str                          # "accessory_price" | "qty" | "remove_accessory"
-    label: str                         # nome exibido ao vendedor
-    packaging_type: str                # "goodpack" | "competitor"
+    model_config = {"extra": "ignore"}   # ignora campos extras como "checked"
+    type: str
+    label: str
+    packaging_type: str
     goodpack_sku_id: _Optional[int] = None
     competitor_unit_id: _Optional[int] = None
     accessory_type_id: _Optional[int] = None
-    value: _Optional[float] = None     # novo preço (None para remove_accessory)
-    qty_field: _Optional[str] = None   # "qty_40ft_dry" etc (para type=qty)
+    value: _Optional[float] = None
+    qty_field: _Optional[str] = None
     currency: str = "USD"
     region: str = "GLOBAL"
 
 class KBApplyOfferPayload(_BaseModel):
+    model_config = {"extra": "ignore"}
     items: _List[KBOfferItem]
 
 
